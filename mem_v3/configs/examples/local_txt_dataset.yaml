@@ -1,0 +1,19 @@
+run:
+  name: local_txt_smoke
+  target_global_steps: 100
+  start_lane: fast_seq256_zero0_gacc4
+
+workload:
+  dataset:
+    type: local_text
+    path: data/sample.txt
+    split: train
+    text_field: text
+    fallback_name: roneneldan/TinyStories
+    mix: ""
+  tokenizer:
+    name: gpt2
+  model:
+    preset: tiny_decoder
+  runtime:
+    chaos_profile: clean

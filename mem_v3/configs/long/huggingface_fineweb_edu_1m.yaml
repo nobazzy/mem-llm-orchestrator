@@ -1,0 +1,31 @@
+run:
+  name: huggingface_fineweb_edu_1m
+  target_global_steps: 1000000
+  output_dir: evidence/huggingface_fineweb_edu_1m
+
+workload:
+  dataset:
+    type: huggingface
+    name: HuggingFaceFW/fineweb-edu
+    config: sample-10BT
+    split: train
+    text_field: text
+    fallback_enabled: true
+    fallback_name: roneneldan/TinyStories
+    fallback_split: train
+
+  tokenizer:
+    name: gpt2
+
+  model:
+    preset: tiny_decoder
+
+training:
+  sequence_length: 256
+  mixed_precision: fp16
+  deepspeed: true
+
+mem:
+  controller_enabled: true
+  api_light_enabled: true
+  lane_policy: default_8gb

@@ -1,0 +1,24 @@
+# MEM v3 default configurable workload.
+# Public package: mem_v3
+# Internal validated core: v89.0.0
+
+run:
+  name: fineweb_edu_default
+  target_global_steps: 300000
+  start_lane: fast_seq256_zero0_gacc4
+
+workload:
+  dataset:
+    type: huggingface
+    name: HuggingFaceFW/fineweb-edu
+    config: sample-10BT
+    split: train
+    text_field: text
+    fallback_name: roneneldan/TinyStories
+    mix: "HuggingFaceFW/fineweb-edu:sample-10BT,roneneldan/TinyStories:"
+  tokenizer:
+    name: gpt2
+  model:
+    preset: tiny_decoder
+  runtime:
+    chaos_profile: real_desktop_contention

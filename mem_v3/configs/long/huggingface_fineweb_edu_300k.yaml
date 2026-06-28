@@ -1,0 +1,24 @@
+run:
+  name: long_hf_fineweb_edu_300k
+  target_global_steps: 300000
+  start_lane: fast_seq256_zero0_gacc4
+
+workload:
+  dataset:
+    type: huggingface
+    name: HuggingFaceFW/fineweb-edu
+    config: sample-10BT
+    split: train
+    text_field: text
+    fallback_name: roneneldan/TinyStories
+    mix: "HuggingFaceFW/fineweb-edu:sample-10BT,roneneldan/TinyStories:"
+  tokenizer:
+    name: gpt2
+  model:
+    preset: tiny_decoder
+  runtime:
+    chaos_profile: real_desktop_contention
+    prefetch_batches: 12
+    prewarm_batches: 12
+    cache_mode: memmap
+    cache_dir: dataset_cache

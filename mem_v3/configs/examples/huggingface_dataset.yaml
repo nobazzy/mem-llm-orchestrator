@@ -1,0 +1,20 @@
+run:
+  name: hf_dataset_example
+  target_global_steps: 1000
+  start_lane: fast_seq256_zero0_gacc4
+
+workload:
+  dataset:
+    type: huggingface
+    name: HuggingFaceFW/fineweb-edu
+    config: sample-10BT
+    split: train
+    text_field: text
+    fallback_name: roneneldan/TinyStories
+    mix: ""
+  tokenizer:
+    name: gpt2
+  model:
+    preset: tiny_decoder
+  runtime:
+    chaos_profile: clean

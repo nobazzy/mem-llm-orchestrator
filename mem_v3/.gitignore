@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+.venv312/
+venv/
+env/
+
+# Runtime/generated artifacts
+logs/
+evidence/
+evidence_packets/
+reports/
+checkpoints/
+dataset_cache/
+chaos_tmp/
+*.log
+*.pid
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.tar.gz
+*.zip
+*.parquet
+*.arrow
+
+# Local datasets and generated data dumps
+*.jsonl
+!data/sample.jsonl
+!data/sample.txt
+
+# Secrets
+.env
+.env.*
+*.env
+secrets.*
+*_API_KEY*
+*.key
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

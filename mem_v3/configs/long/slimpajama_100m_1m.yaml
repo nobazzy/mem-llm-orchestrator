@@ -1,0 +1,34 @@
+run:
+  name: slimpajama_100m_1m
+  target_global_steps: 1000000
+  start_lane: aggressive_seq256_zero0_gacc4
+  output_dir: evidence/slimpajama_100m_1m
+
+workload:
+  dataset:
+    type: huggingface
+    name: DKYoon/SlimPajama-6B
+    config: ""
+    split: train
+    text_field: text
+    fallback_enabled: true
+    fallback_name: roneneldan/TinyStories
+    fallback_split: train
+    mix: "DKYoon/SlimPajama-6B:,roneneldan/TinyStories:"
+
+  tokenizer:
+    name: gpt2
+
+  model:
+    preset: medium_100m
+
+training:
+  sequence_length: 256
+  mixed_precision: fp16
+  deepspeed: true
+
+mem:
+  controller_enabled: true
+  api_light_enabled: true
+  lane_policy: default_8gb
+  checkpoint_resume_required: true

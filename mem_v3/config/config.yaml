@@ -1,0 +1,18 @@
+runtime_version: v89.0.0
+runtime_mode: real_deepspeed_adaptive_control
+api_executive_authority: moderate_validated
+benchmark_modes:
+  - mem_real_chaos
+chaos_profiles:
+  - clean
+  - real_streaming_mix
+  - real_multilingual_noise
+  - real_checkpoint_pressure
+  - real_desktop_contention
+real_dataset_default: HuggingFaceFW/fineweb-edu
+real_dataset_config: sample-10BT
+fallback_dataset: roneneldan/TinyStories
+dataset_mix: HuggingFaceFW/fineweb-edu:sample-10BT,roneneldan/TinyStories:
+tokenizer: gpt2
+sequence_length: 256
+validated_target_steps: 300000

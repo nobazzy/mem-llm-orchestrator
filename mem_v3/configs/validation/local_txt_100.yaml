@@ -1,0 +1,23 @@
+run:
+  name: validation_local_txt_100
+  target_global_steps: 100
+  start_lane: fast_seq256_zero0_gacc4
+
+workload:
+  dataset:
+    type: local_txt
+    path: data/sample.txt
+    split: train
+    text_field: text
+    fallback_name: roneneldan/TinyStories
+    mix: ""
+  tokenizer:
+    name: gpt2
+  model:
+    preset: tiny_decoder
+  runtime:
+    chaos_profile: clean
+    prefetch_batches: 4
+    prewarm_batches: 4
+    cache_mode: memmap
+    cache_dir: dataset_cache
