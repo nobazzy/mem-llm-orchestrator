@@ -1,150 +1,125 @@
-# MEM v3 — Model Execution Manager & LLM Training Orchestrator
+# ⚡ MEM v3 — Model Execution Manager & LLM Training Orchestrator
 
-[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20cu128-ee4c2c.svg)](https://pytorch.org/)
-[![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Enabled-00599C.svg)](https://www.deepspeed.ai/)
-[![Validation Status](https://img.shields.io/badge/Validation-1M%20Sustained%20Steps-success.svg)](#-endurance--validation-evidence)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20cu128-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Zero--OOM-00599C)](https://www.deepspeed.ai/)
+[![Validation](https://img.shields.io/badge/Validation-1M%20Steps%20Zero%20OOM-brightgreen)](mem_v3/EVALUATION.md)
+[![Status](https://img.shields.io/badge/Status-Functional%20%2F%20Active-blue)](#)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](mem_v3/LICENSE)
 
-> **MEM v3** is a high-throughput, fault-tolerant, zero-OOM orchestration engine designed for sustained Large Language Model (LLM) pre-training and fine-tuning on PyTorch and DeepSpeed.
+> **Autonomous, zero-OOM orchestration engine for sustained Large Language Model pre-training and fine-tuning with deterministic policy enforcement.**
 
 ---
 
-## 🌟 Executive Summary
+### 🟢 Status do Projeto
+* **Ambiente Alvo:** Linux / WSL2 (Ubuntu)
+* **Estado:** Funcional e em desenvolvimento ativo.
+* **Filosofia:** *AI proposes. Local policy decides. Runtime executes. Feedback improves.*
 
-Training Large Language Models at scale is inherently risky and expensive. Out-Of-Memory (OOM) exceptions, node failures, and unvalidated hyperparameter tweaks often lead to dead compute time costing thousands of dollars.
+---
 
-**MEM v3** solves this by establishing a **Zero-Trust Policy Engine** over LLM training runs. It dynamically inspects GPU environments, clamps unsafe AI-generated executive directives, manages rotating durable checkpoints, and applies adaptive memory clamping to sustain massive pre-training workloads without crashes.
+## 📌 Visão Geral
 
-```txt
-Key Metric Highlight:
-- Sustained Endurance: 1,000,000 Steps Completed
-- Peak Throughput: ~45,600 tokens/sec
-- Fatal OOM Crashes: 0
+Treinamentos de modelos de linguagem em larga escala sofrem frequentemente com paradas catastróficas por **Out-of-Memory (OOM)**, oscilações de gradiente e falhas de hardware.
+
+O **MEM v3** atua como uma camada intermediária de governança autônoma: ele utiliza um modelo de linguagem como planejador de hiperparâmetros, mas **nunca permite que a IA execute comandos diretamente no hardware**. Todas as diretrizes passam pelo **LocalPolicyEngine**, que valida e aplica *clamping* determinístico antes de chegar ao runtime PyTorch/DeepSpeed.
+
+```
+                 LLM Planner / API Directives
+                             │
+                             ▼
+                 ┌───────────────────────┐
+                 │   LocalPolicyEngine   │ ◄── EnvironmentDoctor
+                 └───────────┬───────────┘     (GPU VRAM, Temp, CUDA State)
+                             │
+               ┌─────────────┴─────────────┐
+               ▼                           ▼
+          [SAFE DIRECTIVE]           [UNSAFE / OOM RISK]
+               │                           │
+               │                     Clamp to Policy Bounds
+               │                           │
+               └─────────────┬─────────────┘
+                             ▼
+                 DeepSpeed / PyTorch Runtime
+                             │
+                             ▼
+                 Rotating Checkpoint & Telemetry
 ```
 
 ---
 
-## 🏗️ System Architecture
+## 📊 Evidências de Endurance & Resultados
 
-MEM v3 is engineered following **Clean Architecture** and **Domain-Driven Design (DDD)** principles to guarantee strict isolation between core business rules, execution policies, and hardware runtime layers.
+Validado em hardware NVIDIA RTX (WSL2 / PyTorch `cu128`):
 
-```mermaid
-graph TD
-    subgraph Application Layer
-        CLI["CLI / Entrypoint (application/cli.py)"]
-    end
-
-    subgraph Core Layer
-        ORCH["MemOrchestrator (core/orchestrator.py)"]
-        POLICY["LocalPolicyEngine (core/policy_engine.py)"]
-        DOCTOR["EnvironmentDoctor (core/safety_guard.py)"]
-    end
-
-    subgraph Domain Layer
-        MODELS["RuntimeRequest & Directives (domain/models.py)"]
-    end
-
-    subgraph Infrastructure & Runtime Layer
-        LLM["LLM Planner / API (infrastructure/llm_client.py)"]
-        RUNNER["DeepSpeedRunner (runtime/deepspeed_runner.py)"]
-        CKPT["CheckpointManager (runtime/checkpoint_manager.py)"]
-        MEM["AdaptiveMemory & Chaos (runtime/adaptive_memory.py)"]
-    end
-
-    CLI --> ORCH
-    ORCH --> DOCTOR
-    ORCH --> LLM
-    ORCH --> POLICY
-    POLICY --> MODELS
-    ORCH --> RUNNER
-    RUNNER --> CKPT
-    RUNNER --> MEM
-```
-
----
-
-## 🛡️ Zero-Trust Policy Engine (AI Directive Clamping)
-
-When using AI agents or external APIs to optimize training hyperparameters (e.g., learning rate multipliers, gradient clip norms, loss scaling), **MEM v3 never executes untrusted directives directly**.
-
-Every request is evaluated by the `LocalPolicyEngine`, which enforces deterministic bounds to prevent GPU crashes or training divergence:
-
-```mermaid
-flowchart LR
-    A[External LLM / API Directive] --> B[LocalPolicyEngine]
-    C[EnvironmentDoctor Hardware Inspection] --> B
-    D[RuntimeRequest] --> B
-    B -->|Validation & Clamping| E{Is Safe?}
-    E -- Yes --> F[Execute DeepSpeed Training]
-    E -- No / Unsafe --> G[Clamp to Safe Policy Bounds & Log Telemetry]
-    G --> F
-```
-
----
-
-## ⚡ Key Features
-
-- **Zero-Trust Policy Clamping:** Automatically caps learning rates, gradient clipping, and batch sizes within verified hardware limits.
-- **Adaptive Memory Management:** Continuous OOM protection and dynamic batch/sequence length adjustment under memory pressure.
-- **Durable & Rotating Checkpointing:** Seamless recovery path (*safe-recovery*) with zero progress loss across interrupted sessions.
-- **Chaos Engineering & Resilience Auditing:** Built-in stress testing modules (`real_chaos.py`) to validate controller stability under degraded environments.
-- **Structured Telemetry:** Full execution logging in structured `JSON` and `JSONL` formats (`api_telemetry.jsonl`, `api_usage_summary.json`).
-
----
-
-## 📊 Endurance & Validation Evidence
-
-MEM v3 has undergone rigorous validation on high-performance NVIDIA hardware (RTX 50-series / Blackwell class under WSL2 with PyTorch `cu128`):
-
-| Metric | Validated Result |
+| Métrica | Resultado Validado |
 | :--- | :--- |
-| **Global Steps Target** | **1,000,000 / 1,000,000** |
-| **Observed Mean Throughput** | **~33,000 tokens/sec** |
-| **Observed Peak Throughput** | **~45,600 tokens/sec** |
-| **Fatal OOM Crashes** | **0 (Zero)** |
-| **Recovery Continuity** | **100% Validated** |
+| **Passos Globais Contínuos** | **1.000.000 / 1.000.000 steps** |
+| **Throughput Médio** | **~33.000 tokens/segundo** |
+| **Throughput de Pico** | **~45.600 tokens/segundo** |
+| **OOM Fatais Registrados** | **0 (Zero)** |
+| **Recuperação de Checkpoint** | **100% Contínua sem perda de progresso** |
 
 ---
 
-## 🚀 Quickstart
+## 🛠️ Guia de Execução
 
-### Prerequisites
-- **OS:** Linux or WSL2 (Ubuntu)
-- **Python:** 3.10, 3.11, or 3.12
-- **Hardware:** NVIDIA GPU with CUDA support
+### 1. Pré-requisitos
+* Linux ou Windows com **WSL2 (Ubuntu 22.04+)**
+* Python 3.10, 3.11 ou 3.12
+* GPU NVIDIA com drivers CUDA atualizados
 
-### 1. Installation
+### 2. Instalação
 ```bash
-# Clone the repository
-git clone https://github.com/nobazzy/ProjetoOrquestrador-.git
-cd ProjetoOrquestrador-/mem_v3
+# Clone o repositório
+git clone https://github.com/nobazzy/mem-llm-orchestrator.git
+cd mem-llm-orchestrator/mem_v3
 
-# Install as editable package
+# Crie e ative o ambiente virtual
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Instale o pacote e dependências
+pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2. Running Core Tests
+### 3. Execução dos Testes e Validação
 ```bash
+# Rodar suíte de testes unitários e de integração
 pytest
+
+# Testar módulos de resiliência e injeção de caos
+python3 -m pytest tests/test_chaos.py
+```
+
+### 4. Executando o Orquestrador
+```bash
+# Execução padrão via CLI
+python3 main.py
+
+# Para visualizar as opções de configuração e telemetria:
+python3 application/cli.py --help
 ```
 
 ---
 
-## 💼 Commercial & Consultancy Inquiries
+## 📂 Documentação Detalhada Existente
 
-**MEM v3** was architected and built for production-grade AI infrastructure.
-
-If you are looking for:
-- 🛠️ **Custom AI Infrastructure & MLOps Orchestration**
-- ⚡ **LLM Pre-training & Fine-Tuning Optimization (PyTorch / DeepSpeed)**
-- 🔒 **Resilience Auditing & GPU Cluster Efficiency**
-- 🤝 **Senior AI Systems Engineering Consulting**
-
-📩 **Contact:** Reach out via GitHub ([@nobazzy](https://github.com/nobazzy)) or LinkedIn for business inquiries and technical consultation.
+Para aprofundamento técnico e logs de validação, consulte os documentos nos subdiretórios:
+* 📄 [`mem_v3/README_PT.md`](mem_v3/README_PT.md) — Documentação técnica completa em português.
+* 📄 [`mem_v3/EVALUATION.md`](mem_v3/EVALUATION.md) — Relatório detalhado dos benchmarks e testes de 1M de steps.
+* 📄 [`mem_v3/RELEASE_NOTES.md`](mem_v3/RELEASE_NOTES.md) — Histórico de versões e melhorias do Policy Engine.
 
 ---
 
-## 📜 License
+## 💼 Inquiries & Technical Contact
 
-This project is licensed under the MIT License — see the [LICENSE](mem_v3/LICENSE) file for details.
+**MEM v3** was architected for production-grade AI infrastructure.
+For consulting, custom integrations, or architecture audits:
+* 📩 Reach out via GitHub ([@nobazzy](https://github.com/nobazzy)) or LinkedIn.
+
+---
+
+## 📜 Licença
+Distribuído sob a licença MIT. Veja [`LICENSE`](mem_v3/LICENSE) para mais detalhes.
