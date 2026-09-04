@@ -28,16 +28,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="MEM Live Training Execution")
     parser.add_argument("--steps", type=int, default=1000000)
     parser.add_argument("--target-steps", type=int, default=1000000)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--sequence-length", type=int, default=64)
     parser.add_argument("--dataset-name", default="DKYoon/SlimPajama-6B")
     parser.add_argument("--dataset-fallback-name", default="roneneldan/TinyStories")
     parser.add_argument("--model-preset", default="medium_75m")
+    parser.add_argument("--precision", default="fp16")
     args = parser.parse_args()
+
+    import torch
+    device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    effective_precision = args.precision if torch.cuda.is_available() else "fp32"
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     print("============================================================")
-    print("  MEM ORCHESTRATOR — INICIANDO TREINO REAL")
+    print("  MEM ORCHESTRATOR — INICIANDO TREINO REAL NA GPU")
+    print(f"  Dispositivo: {device_name} (Precisão: {effective_precision.upper()})")
     print(f"  Target: {args.target_steps:,} steps | Executando lote: {args.steps:,} steps")
     print(f"  Dataset: {args.dataset_name} (Streaming) [Fallback: {args.dataset_fallback_name}]")
     print(f"  Modelo: {args.model_preset} (~72M parâmetros)")
@@ -50,7 +56,7 @@ def main() -> None:
         max_steps=args.target_steps,
         batch_size=args.batch_size,
         zero_stage=0,
-        precision="fp32",
+        precision=effective_precision,
         persistent_checkpoint=True,
         confirmation=CONFIRMATION_TOKEN,
         operator=True,
@@ -107,9 +113,9 @@ def main() -> None:
         steps=args.steps,
         batch_size=args.batch_size,
         zero_stage=0,
-        precision="fp32",
+        precision=effective_precision,
         persistent_checkpoint=True,
-        applied_hyperparams={"batch_size": args.batch_size, "precision": "fp32", "gradient_accumulation_steps": 1},
+        applied_hyperparams={"batch_size": args.batch_size, "precision": effective_precision, "gradient_accumulation_steps": 1},
         executive_directives=decision.executive_runtime_directives,
         dataset_settings={
             "real_dataset": True,
