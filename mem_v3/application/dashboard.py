@@ -382,14 +382,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       // Dynamic AI Directives box
       const ctrl = data.controller || {};
       const api = data.api_telemetry || {};
-      if (ctrl.plan_source || api.total_calls !== undefined) {
+      const totalCalls = api.api_calls_attempted || api.total_calls || 0;
+      const okCalls = api.api_calls_succeeded || api.successful_calls || 0;
+      const totalTokens = api.api_total_tokens || api.tokens_total || 0;
+
+      if (ctrl.plan_source || totalCalls > 0) {
         const aiBox = document.getElementById('ai-directive-box');
         if (aiBox) {
           aiBox.innerHTML = `
             <p>• Fonte: <span class="text-slate-200 font-bold">${ctrl.plan_source || 'LLMPlanner'}</span></p>
             <p>• Ação: <span class="text-indigo-300 font-bold">${ctrl.executive_action || 'stabilize'}</span></p>
-            <p>• Chamadas API: ${api.total_calls || 0} (${api.successful_calls || 0} ok)</p>
-            <p>• Tokens consumidos: ${(api.tokens_total || 0).toLocaleString()}</p>
+            <p>• Chamadas API: ${totalCalls} (${okCalls} ok)</p>
+            <p>• Tokens consumidos: ${totalTokens.toLocaleString()}</p>
           `;
         }
 
@@ -408,11 +412,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     function updateCharts(milestones) {
       if (!milestones || milestones.length === 0) return;
       const labels = milestones.map(m => m.step);
-      const losses = milestones.map(m => m.loss);
+      const rawLosses = milestones.map(m => m.loss);
       const tokens = milestones.map(m => m.tokens_per_second || (m.tokens_processed ? m.tokens_processed / (m.step || 1) : 0));
 
+      // Exponential Moving Average smoothing (WandB/Tensorboard style)
+      let ema = rawLosses[0];
+      const smoothedLosses = rawLosses.map(val => {
+        ema = 0.20 * val + 0.80 * ema;
+        return Number(ema.toFixed(4));
+      });
+
       lossChart.data.labels = labels;
-      lossChart.data.datasets[0].data = losses;
+      lossChart.data.datasets[0].data = smoothedLosses;
       lossChart.update();
 
       throughputChart.data.labels = labels;
