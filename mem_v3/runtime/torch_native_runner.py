@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import math
@@ -184,6 +184,46 @@ class PyTorchNativeRunner:
                 guardrail=guardrail_seconds,
                 total_step=total_step_seconds,
             )
+
+            heartbeat_interval = _safe_int(data_cfg.get("progress_heartbeat_interval", 5), 5, low=1, high=100)
+            if evidence_path and (step % heartbeat_interval == 0 or step == effective_steps):
+                now_elapsed = max(time.perf_counter() - start_time, 1e-9)
+                cur_tokens_sec = round(metrics.tokens_processed / now_elapsed, 2)
+                cur_steps_sec = round(step / now_elapsed, 2)
+                prog_payload = {
+                    "step": step,
+                    "target_steps": data_cfg.get("target_steps", effective_steps),
+                    "tokens_processed": metrics.tokens_processed,
+                    "tokens_per_second": cur_tokens_sec,
+                    "steps_per_second": cur_steps_sec,
+                    "loss": round(loss_val, 4),
+                    "loss_first": round(metrics.loss_first, 4) if metrics.loss_first is not None else None,
+                    "loss_last": round(loss_val, 4),
+                    "phase": "training",
+                    "bottleneck": "gpu_compute" if torch.cuda.is_available() else "cpu_compute",
+                    "elapsed_seconds": round(now_elapsed, 2),
+                    "timestamp": time.time(),
+                }
+                try:
+                    evidence_path.mkdir(parents=True, exist_ok=True)
+                    if progress_path:
+                        tmp_prog = progress_path.with_suffix(".tmp")
+                        tmp_prog.write_text(json.dumps(prog_payload, indent=2), encoding="utf-8")
+                        tmp_prog.replace(progress_path)
+                    if milestones_path:
+                        milestone_entry = {
+                            "step": step,
+                            "loss": round(loss_val, 4),
+                            "tokens_per_second": cur_tokens_sec,
+                            "steps_per_second": cur_steps_sec,
+                            "tokens_processed": metrics.tokens_processed,
+                            "elapsed_seconds": round(now_elapsed, 2),
+                            "timestamp": time.time(),
+                        }
+                        with open(milestones_path, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(milestone_entry) + "\n")
+                except Exception:
+                    pass
 
         total_elapsed = max(time.perf_counter() - start_time, 1e-9)
         metrics.total_seconds = round(total_elapsed, 6)

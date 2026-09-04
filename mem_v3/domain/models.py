@@ -59,7 +59,7 @@ class RuntimeRequest:
         self.tokenizer_name = str(self.tokenizer_name or "gpt2")
         self.model_preset = str(self.model_preset or "tiny_decoder")
         self.benchmark_mode = str(self.benchmark_mode or "mem_real_chaos")
-        if self.benchmark_mode not in {"mem_real_chaos"}:
+        if self.benchmark_mode not in {"mem_real_chaos", "mem_native_pytorch", "torch_native"}:
             self.benchmark_mode = "mem_real_chaos"
         self.chaos_profile = str(self.chaos_profile or "real_streaming_mix")
         if self.chaos_profile not in {"clean", "real_streaming_mix", "real_multilingual_noise", "real_checkpoint_pressure", "real_desktop_contention"}:

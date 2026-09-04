@@ -32,10 +32,15 @@ class LocalPolicyEngine:
             return PolicyDecision(False, "no_go", "real_micro_train_not_requested", 0, False)
         if not plan.should_run_micro_train:
             return PolicyDecision(False, "no_go", "candidate_declined_micro_train", 0, False)
-        if not env.torch.get("cuda_available"):
-            return PolicyDecision(False, "no_go", "cuda_unavailable", 0, False)
-        if not env.deepspeed.get("import_ok"):
-            return PolicyDecision(False, "no_go", "deepspeed_not_importable", 0, False)
+        is_native = req.benchmark_mode in {"mem_native_pytorch", "torch_native"}
+        if is_native:
+            if not env.torch.get("import_ok"):
+                return PolicyDecision(False, "no_go", "torch_unavailable", 0, False)
+        else:
+            if not env.torch.get("cuda_available"):
+                return PolicyDecision(False, "no_go", "cuda_unavailable", 0, False)
+            if not env.deepspeed.get("import_ok"):
+                return PolicyDecision(False, "no_go", "deepspeed_not_importable", 0, False)
         if req.max_steps > 10_000_000:
             return PolicyDecision(False, "no_go", "requested_steps_exceed_hard_cap", 0, False)
         if not req.real_dataset:
@@ -45,8 +50,12 @@ class LocalPolicyEngine:
         zero = int(req.zero_stage)
         precision = str(req.precision).lower()
         grad_accum = int(req.gradient_accumulation_steps)
-        lane = "v89_real_chaos_mem_lane"
-        reason = "v89 LocalPolicy allowed: real chaos benchmark with real dataset mix, profiler, checkpoint pressure and guarded adaptation"
+        lane = "v89_pytorch_native_mem_lane" if is_native else "v89_real_chaos_mem_lane"
+        reason = (
+            "v89 LocalPolicy allowed: portable native PyTorch execution with real dataset streaming"
+            if is_native
+            else "v89 LocalPolicy allowed: real chaos benchmark with real dataset mix, profiler, checkpoint pressure and guarded adaptation"
+        )
         rejections: List[str] = []
         real_limited_apply = False
         if req.real_limited_apply:
