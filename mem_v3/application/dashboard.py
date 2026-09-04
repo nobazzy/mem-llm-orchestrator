@@ -5,7 +5,7 @@ import json
 import os
 import sys
 import time
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -460,7 +460,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
 
 def run_dashboard(port: int = 8080) -> None:
-    server = HTTPServer(("0.0.0.0", port), DashboardRequestHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), DashboardRequestHandler)
     print(f"============================================================")
     print(f"  MEM ORCHESTRATOR LIVE DASHBOARD")
     print(f"  Painel ativo em: http://localhost:{port}")
