@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+_root = str(Path(__file__).resolve().parent.parent)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
 from core.orchestrator import MemOrchestrator
 from domain.models import VERSION
@@ -100,3 +106,7 @@ def main(argv: list[str] | None = None) -> None:
         print_json(orchestrator.run_deepspeed(req))
         return
     build_parser().print_help()
+
+
+if __name__ == "__main__":
+    main()

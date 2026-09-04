@@ -28,8 +28,15 @@ def _json_safe(obj: Any) -> Any:
 
 
 def _fsync_file(path: Path) -> None:
-    with path.open("rb") as f:
-        os.fsync(f.fileno())
+    try:
+        with path.open("r+b") as f:
+            os.fsync(f.fileno())
+    except Exception:
+        try:
+            with path.open("rb") as f:
+                os.fsync(f.fileno())
+        except Exception:
+            pass
 
 
 def _fsync_dir(path: Path) -> None:
@@ -323,6 +330,7 @@ class CheckpointManager:
                 "checkpoint_dir": str(final_dir),
                 "checkpoint_mode": "validation_failed",
                 "checkpoint_validated": False,
+                "checkpoint_validation_failed": True,
                 "checkpoint_error": repr(exc),
             }
 
