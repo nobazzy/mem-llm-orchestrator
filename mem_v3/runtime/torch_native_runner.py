@@ -64,7 +64,10 @@ class PyTorchNativeRunner:
         optimizer_lr = base_lr * api_lr_multiplier
 
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model_dtype = torch.float32 if device.type == "cpu" or effective_precision == "fp32" else torch.float16
+        model_dtype = torch.float32
+
+        use_amp = (device.type == "cuda") and (effective_precision in {"fp16", "bf16"})
+        amp_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
 
         real_dataset = bool(data_cfg.get("real_dataset", False))
         dataset_info: Dict[str, Any] = {"enabled": real_dataset, "task": "causal_language_modeling"}
@@ -132,8 +135,13 @@ class PyTorchNativeRunner:
                 input_ids, labels = batcher.next_batch()
                 data_fetch_seconds = time.perf_counter() - data_start
                 forward_start = time.perf_counter()
-                logits = model(input_ids)
-                loss = criterion(logits.float().reshape(-1, logits.shape[-1]), labels.reshape(-1))
+                if use_amp:
+                    with torch.amp.autocast(device_type="cuda", dtype=amp_dtype):
+                        logits = model(input_ids)
+                        loss = criterion(logits.reshape(-1, logits.shape[-1]), labels.reshape(-1))
+                else:
+                    logits = model(input_ids)
+                    loss = criterion(logits.reshape(-1, logits.shape[-1]), labels.reshape(-1))
                 metrics.tokens_processed += int(input_ids.numel())
             else:
                 x = torch.randn(effective_batch, 16, device=device, dtype=model_dtype)
@@ -222,6 +230,26 @@ class PyTorchNativeRunner:
                         }
                         with open(milestones_path, "a", encoding="utf-8") as f:
                             f.write(json.dumps(milestone_entry) + "\n")
+                except Exception:
+                    pass
+
+            checkpoint_interval = _safe_int(data_cfg.get("checkpoint_interval", 500), 500, low=50, high=100000)
+            if persistent_checkpoint and self.checkpoint_manager and step % checkpoint_interval == 0:
+                try:
+                    self.checkpoint_manager.save_live_checkpoint(
+                        model=model,
+                        optimizer=optimizer,
+                        metadata={
+                            "version": "v89.0.0",
+                            "step": step,
+                            "micro_train_steps_completed": step,
+                            "tokens_processed": metrics.tokens_processed,
+                            "loss": loss_val,
+                            "tokens_per_second": cur_tokens_sec,
+                            "steps_per_second": cur_steps_sec,
+                        },
+                        label="v89",
+                    )
                 except Exception:
                     pass
 
