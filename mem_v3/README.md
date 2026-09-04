@@ -1,8 +1,9 @@
-# MEM v3 — Model Execution Manager & LLM Training Orchestrator
+﻿# MEM v3 — Model Execution Manager & LLM Training Orchestrator
 
-[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20cu128-ee4c2c.svg)](https://pytorch.org/)
+[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20(CUDA%20%2B%20CPU)-ee4c2c.svg)](https://pytorch.org/)
 [![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Enabled-00599C.svg)](https://www.deepspeed.ai/)
+[![Tests](https://img.shields.io/badge/Tests-33%2F33%20Passing-brightgreen)](tests/)
 [![Validation Status](https://img.shields.io/badge/Validation-1M%20Sustained%20Steps-success.svg)](#-endurance--validation-evidence)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -21,6 +22,7 @@ Key Metric Highlight:
 - Sustained Endurance: 1,000,000 Steps Completed
 - Peak Throughput: ~45,600 tokens/sec
 - Fatal OOM Crashes: 0
+- Atomic Checkpoint Recovery: 100% Continuous with SHA256 verification
 ```
 
 ---
@@ -45,11 +47,17 @@ graph TD
         MODELS["RuntimeRequest & Directives (domain/models.py)"]
     end
 
-    subgraph Infrastructure & Runtime Layer
+    subgraph Infrastructure Layer
         LLM["LLM Planner / API (infrastructure/llm_client.py)"]
-        RUNNER["DeepSpeedRunner (runtime/deepspeed_runner.py)"]
+        LOGS["Telemetry & Logger (infrastructure/logging.py)"]
+    end
+
+    subgraph Runtime Layer
+        RUNNER_DS["DeepSpeedRunner (runtime/deepspeed_runner.py)"]
+        RUNNER_PY["PyTorchNativeRunner (runtime/torch_native_runner.py)"]
         CKPT["CheckpointManager (runtime/checkpoint_manager.py)"]
-        MEM["AdaptiveMemory & Chaos (runtime/adaptive_memory.py)"]
+        CTRL["Runtime Controller (runtime/controller/)"]
+        LM["Causal LM & Dataset Batcher (runtime/lm_model.py)"]
     end
 
     CLI --> ORCH
@@ -57,18 +65,20 @@ graph TD
     ORCH --> LLM
     ORCH --> POLICY
     POLICY --> MODELS
-    ORCH --> RUNNER
-    RUNNER --> CKPT
-    RUNNER --> MEM
+    ORCH --> RUNNER_DS
+    ORCH --> RUNNER_PY
+    RUNNER_DS --> CKPT
+    RUNNER_PY --> CKPT
+    CTRL --> ORCH
 ```
 
 ---
 
 ## 🛡️ Zero-Trust Policy Engine (AI Directive Clamping)
 
-When using AI agents or external APIs to optimize training hyperparameters (e.g., learning rate multipliers, gradient clip norms, loss scaling), **MEM v3 never executes untrusted directives directly**.
+When using AI agents or external APIs (e.g. OpenAI GPT-4o) to optimize training hyperparameters (learning rate multipliers, gradient clip norms, loss scaling), **MEM v3 never executes untrusted directives directly**.
 
-Every request is evaluated by the `LocalPolicyEngine`, which enforces deterministic bounds to prevent GPU crashes or training divergence:
+Every request is evaluated by the `LocalPolicyEngine`, which enforces deterministic bounds:
 
 ```mermaid
 flowchart LR
@@ -76,75 +86,44 @@ flowchart LR
     C[EnvironmentDoctor Hardware Inspection] --> B
     D[RuntimeRequest] --> B
     B -->|Validation & Clamping| E{Is Safe?}
-    E -- Yes --> F[Execute DeepSpeed Training]
+    E -- Yes --> F[Execute DeepSpeed / PyTorch Training]
     E -- No / Unsafe --> G[Clamp to Safe Policy Bounds & Log Telemetry]
-    G --> F
 ```
 
----
-
-## ⚡ Key Features
-
-- **Zero-Trust Policy Clamping:** Automatically caps learning rates, gradient clipping, and batch sizes within verified hardware limits.
-- **Adaptive Memory Management:** Continuous OOM protection and dynamic batch/sequence length adjustment under memory pressure.
-- **Durable & Rotating Checkpointing:** Seamless recovery path (*safe-recovery*) with zero progress loss across interrupted sessions.
-- **Chaos Engineering & Resilience Auditing:** Built-in stress testing modules (`real_chaos.py`) to validate controller stability under degraded environments.
-- **Structured Telemetry:** Full execution logging in structured `JSON` and `JSONL` formats (`api_telemetry.jsonl`, `api_usage_summary.json`).
+### Enforced Invariants
+1. **LR Multiplier Clamping:** Clamped between `0.85` and `1.0` to avoid catastrophic divergence.
+2. **Gradient Clip Norm:** Clamped between `0.25` and `1.25` to protect numerical stability.
+3. **Loss Scale Power:** Clamped to safe integer bounds `[6, 10]`.
+4. **Hard Step Cap:** Hard ceiling at `10,000,000` steps.
+5. **Operator Confirmation Token:** Requires explicit token `I_UNDERSTAND_V89_RECOVERY_CONTROL`.
 
 ---
 
-## 📊 Endurance & Validation Evidence
+## 🔄 Atomic Durable Checkpointing
 
-MEM v3 has undergone rigorous validation on high-performance NVIDIA hardware (RTX 50-series / Blackwell class under WSL2 with PyTorch `cu128`):
+The `CheckpointManager` implements an atomic two-phase commit protocol:
 
-| Metric | Validated Result |
-| :--- | :--- |
-| **Global Steps Target** | **1,000,000 / 1,000,000** |
-| **Observed Mean Throughput** | **~33,000 tokens/sec** |
-| **Observed Peak Throughput** | **~45,600 tokens/sec** |
-| **Fatal OOM Crashes** | **0 (Zero)** |
-| **Recovery Continuity** | **100% Validated** |
+1. **Staging:** Writes the checkpoint payload (`mem_model_optimizer.pt`) into a unique PID/UUID temporary directory.
+2. **In-Memory Validation:** Immediately loads the PyTorch tensors from the temporary file into memory to verify non-corruption.
+3. **Integrity Hash:** Computes the SHA256 checksum and stores `mem_model_optimizer.pt.sha256`.
+4. **Atomic Promotion:** Atomically replaces the target live slot (`live_00`, `live_01`, `live_02`). If an error occurs, the previous published slot remains unmodified.
+5. **Latest Pointer:** Updates `latest.txt` atomically only after successful publication.
 
 ---
 
-## 🚀 Quickstart
+## 🧪 Comprehensive Test Suite
 
-### Prerequisites
-- **OS:** Linux or WSL2 (Ubuntu)
-- **Python:** 3.10, 3.11, or 3.12
-- **Hardware:** NVIDIA GPU with CUDA support
+The project includes unit tests, mock suites, and integration tests:
 
-### 1. Installation
 ```bash
-# Clone the repository
-git clone https://github.com/nobazzy/ProjetoOrquestrador-.git
-cd ProjetoOrquestrador-/mem_v3
+# Run the 33 automated tests
+pytest -v
 
-# Install as editable package
-pip install -e .
+# Run static architectural validation
+python scripts/v89_static_validation.py
 ```
-
-### 2. Running Core Tests
-```bash
-pytest
-```
-
----
-
-## 💼 Commercial & Consultancy Inquiries
-
-**MEM v3** was architected and built for production-grade AI infrastructure.
-
-If you are looking for:
-- 🛠️ **Custom AI Infrastructure & MLOps Orchestration**
-- ⚡ **LLM Pre-training & Fine-Tuning Optimization (PyTorch / DeepSpeed)**
-- 🔒 **Resilience Auditing & GPU Cluster Efficiency**
-- 🤝 **Senior AI Systems Engineering Consulting**
-
-📩 **Contact:** Reach out via GitHub ([@nobazzy](https://github.com/nobazzy)) or LinkedIn for business inquiries and technical consultation.
 
 ---
 
 ## 📜 License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for more details.
