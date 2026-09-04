@@ -26,18 +26,21 @@ from runtime.torch_native_runner import PyTorchNativeRunner
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MEM Live Training Execution")
-    parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument("--steps", type=int, default=1000000)
     parser.add_argument("--target-steps", type=int, default=1000000)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--sequence-length", type=int, default=64)
-    parser.add_argument("--dataset-name", default="roneneldan/TinyStories")
+    parser.add_argument("--dataset-name", default="DKYoon/SlimPajama-6B")
+    parser.add_argument("--dataset-fallback-name", default="roneneldan/TinyStories")
+    parser.add_argument("--model-preset", default="medium_75m")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     print("============================================================")
     print("  MEM ORCHESTRATOR — INICIANDO TREINO REAL")
-    print(f"  Target: {args.target_steps:,} steps | Executando lote: {args.steps} steps")
-    print(f"  Dataset: {args.dataset_name} (Streaming)")
+    print(f"  Target: {args.target_steps:,} steps | Executando lote: {args.steps:,} steps")
+    print(f"  Dataset: {args.dataset_name} (Streaming) [Fallback: {args.dataset_fallback_name}]")
+    print(f"  Modelo: {args.model_preset} (~72M parâmetros)")
     print(f"  OpenAI API Key: {'PRESENTE (' + api_key[:10] + '...)' if api_key else 'AUSENTE'}")
     print("============================================================\n")
 
@@ -54,7 +57,9 @@ def main() -> None:
         real_micro_train=True,
         real_dataset=True,
         dataset_name=args.dataset_name,
+        dataset_fallback_name=args.dataset_fallback_name,
         sequence_length=args.sequence_length,
+        model_preset=args.model_preset,
         benchmark_mode="mem_native_pytorch",
         llm_enabled=bool(api_key),
         api_executive_moderate=bool(api_key),
@@ -109,15 +114,16 @@ def main() -> None:
         dataset_settings={
             "real_dataset": True,
             "dataset_name": args.dataset_name,
-            "dataset_fallback_name": args.dataset_name,
+            "dataset_fallback_name": args.dataset_fallback_name,
             "dataset_split": "train",
             "dataset_streaming": True,
             "tokenizer_name": "gpt2",
             "sequence_length": args.sequence_length,
-            "model_preset": "tiny_decoder",
+            "model_preset": args.model_preset,
             "evidence_dir": str(evidence_dir),
             "target_steps": args.target_steps,
             "progress_heartbeat_interval": 5,
+            "checkpoint_interval": 500,
         },
     )
 
