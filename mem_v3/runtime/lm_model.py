@@ -86,22 +86,43 @@ class TinyCausalTransformer(nn.Module):
 
 def build_tiny_causal_lm(vocab_size: int, seq_len: int, preset: str = "tiny_decoder") -> nn.Module:
 
-    if preset in {"medium_50m", "decoder_50m", "50m_decoder"}:
-        # Approx. 45-50M parameters with GPT-2 vocabulary and tied embeddings.
-        # Practical 8GB preset: lower optimizer/VRAM pressure than 100M while
-        # preserving a meaningful transformer workload for controller evaluation.
+    if preset in {"xlarge_250m", "decoder_250m", "250m_decoder", "250m"}:
+        # Approx. 255.1M parameters with GPT-2 vocabulary and tied embeddings.
+        # Scaled 250M architecture: d_model=1024, heads=16, layers=16, ff=4096.
         return TinyCausalTransformer(
             vocab_size=vocab_size,
             seq_len=seq_len,
-            d_model=512,
-            nhead=8,
-            num_layers=7,
-            dim_feedforward=2048,
+            d_model=1024,
+            nhead=16,
+            num_layers=16,
+            dim_feedforward=4096,
+        )
+
+    if preset in {"large_130m", "decoder_130m", "130m_decoder", "130m"}:
+        # Approx. 130M parameters with GPT-2 vocabulary and tied embeddings.
+        # Scaled 130M architecture: d_model=768, heads=12, layers=12, ff=3072.
+        return TinyCausalTransformer(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            d_model=768,
+            nhead=12,
+            num_layers=12,
+            dim_feedforward=3072,
+        )
+
+    if preset in {"medium_100m", "decoder_100m", "100m_decoder"}:
+        # Approx. 95-105M parameters with GPT-2 vocabulary and tied embeddings.
+        return TinyCausalTransformer(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            d_model=768,
+            nhead=12,
+            num_layers=8,
+            dim_feedforward=3072,
         )
 
     if preset in {"medium_75m", "decoder_75m", "75m_decoder"}:
         # Approx. 72M parameters with GPT-2 vocabulary and tied embeddings.
-        # Practical 8GB preset: high capacity while fitting smoothly in memory.
         return TinyCausalTransformer(
             vocab_size=vocab_size,
             seq_len=seq_len,
@@ -111,17 +132,17 @@ def build_tiny_causal_lm(vocab_size: int, seq_len: int, preset: str = "tiny_deco
             dim_feedforward=2560,
         )
 
-    if preset in {"medium_100m", "decoder_100m", "100m_decoder"}:
-        # Approx. 95-105M parameters with GPT-2 vocabulary and tied embeddings.
-        # This is the validated 100M-class local endurance preset.
+    if preset in {"medium_50m", "decoder_50m", "50m_decoder"}:
+        # Approx. 45-50M parameters with GPT-2 vocabulary and tied embeddings.
         return TinyCausalTransformer(
             vocab_size=vocab_size,
             seq_len=seq_len,
-            d_model=768,
-            nhead=12,
-            num_layers=8,
-            dim_feedforward=3072,
+            d_model=512,
+            nhead=8,
+            num_layers=7,
+            dim_feedforward=2048,
         )
+
     if preset == "small_decoder":
         return TinyCausalTransformer(
             vocab_size=vocab_size,

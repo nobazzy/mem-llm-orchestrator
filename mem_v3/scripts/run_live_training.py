@@ -95,6 +95,7 @@ def main() -> None:
         checkpoint_manager=ckpt_mgr,
         evidence_dir=evidence_dir,
         initial_lane=args.start_lane,
+        model_preset=args.model_preset,
     )
 
     result = runner.train_loop(

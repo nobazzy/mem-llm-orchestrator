@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import math
@@ -28,38 +28,76 @@ class LaneConfig:
     notes: str = ""
 
 
-STANDARD_LANES: Dict[str, LaneConfig] = {
-    "aggressive_seq256_zero0_gacc4": LaneConfig(
-        name="aggressive_seq256_zero0_gacc4",
-        batch_size=16,
-        sequence_length=256,
-        gradient_accumulation_steps=4,
-        min_tokens_floor=18000.0,
-        expected_peak_tokens=42000.0,
-        precision="fp16",
-        notes="Primary high-throughput lane",
-    ),
-    "fast_seq256_zero0_gacc4": LaneConfig(
-        name="fast_seq256_zero0_gacc4",
-        batch_size=10,
-        sequence_length=256,
-        gradient_accumulation_steps=4,
-        min_tokens_floor=16000.0,
-        expected_peak_tokens=32000.0,
-        precision="fp16",
-        notes="Stable fast fallback lane",
-    ),
-    "safe_seq256": LaneConfig(
-        name="safe_seq256",
-        batch_size=6,
-        sequence_length=256,
-        gradient_accumulation_steps=2,
-        min_tokens_floor=12000.0,
-        expected_peak_tokens=22000.0,
-        precision="fp16",
-        notes="Conservative recovery lane",
-    ),
-}
+def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfig]:
+    if model_preset in {"xlarge_250m", "decoder_250m", "250m_decoder", "250m", "huge_350m"}:
+        return {
+            "aggressive_seq256_zero0_gacc4": LaneConfig(
+                name="aggressive_seq256_zero0_gacc4",
+                batch_size=8,
+                sequence_length=256,
+                gradient_accumulation_steps=4,
+                min_tokens_floor=8000.0,
+                expected_peak_tokens=24000.0,
+                precision="fp16",
+                notes="Primary 250M high-capacity lane",
+            ),
+            "fast_seq256_zero0_gacc4": LaneConfig(
+                name="fast_seq256_zero0_gacc4",
+                batch_size=6,
+                sequence_length=256,
+                gradient_accumulation_steps=4,
+                min_tokens_floor=6000.0,
+                expected_peak_tokens=18000.0,
+                precision="fp16",
+                notes="Fast fallback 250M lane",
+            ),
+            "safe_seq256": LaneConfig(
+                name="safe_seq256",
+                batch_size=4,
+                sequence_length=256,
+                gradient_accumulation_steps=2,
+                min_tokens_floor=4000.0,
+                expected_peak_tokens=12000.0,
+                precision="fp16",
+                notes="Conservative recovery 250M lane",
+            ),
+        }
+
+    return {
+        "aggressive_seq256_zero0_gacc4": LaneConfig(
+            name="aggressive_seq256_zero0_gacc4",
+            batch_size=16,
+            sequence_length=256,
+            gradient_accumulation_steps=4,
+            min_tokens_floor=18000.0,
+            expected_peak_tokens=42000.0,
+            precision="fp16",
+            notes="Primary high-throughput lane",
+        ),
+        "fast_seq256_zero0_gacc4": LaneConfig(
+            name="fast_seq256_zero0_gacc4",
+            batch_size=10,
+            sequence_length=256,
+            gradient_accumulation_steps=4,
+            min_tokens_floor=16000.0,
+            expected_peak_tokens=32000.0,
+            precision="fp16",
+            notes="Stable fast fallback lane",
+        ),
+        "safe_seq256": LaneConfig(
+            name="safe_seq256",
+            batch_size=6,
+            sequence_length=256,
+            gradient_accumulation_steps=2,
+            min_tokens_floor=12000.0,
+            expected_peak_tokens=22000.0,
+            precision="fp16",
+            notes="Conservative recovery lane",
+        ),
+    }
+
+
+STANDARD_LANES: Dict[str, LaneConfig] = get_lanes_for_model("medium_75m")
 
 
 class AdaptiveLaneRunner:
@@ -71,12 +109,14 @@ class AdaptiveLaneRunner:
         evidence_dir: Path,
         initial_lane: str = "aggressive_seq256_zero0_gacc4",
         lanes: Optional[Dict[str, LaneConfig]] = None,
+        model_preset: str = "medium_75m",
     ) -> None:
         self.checkpoint_manager = checkpoint_manager
         self.evidence_dir = Path(evidence_dir)
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
-        self.lanes = dict(lanes or STANDARD_LANES)
-        self.current_lane = self.lanes.get(initial_lane, self.lanes["aggressive_seq256_zero0_gacc4"])
+        self.model_preset = model_preset
+        self.lanes = dict(lanes or get_lanes_for_model(model_preset))
+        self.current_lane = self.lanes.get(initial_lane, list(self.lanes.values())[0])
         self.events_file = self.evidence_dir / "v89_sustained_control_events.jsonl"
         self.progress_file = self.evidence_dir / "runtime_progress_latest.json"
         self.milestones_file = self.evidence_dir / "runtime_milestones.jsonl"
