@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import tempfile
 from pathlib import Path
@@ -30,10 +30,15 @@ def test_get_lanes_for_model_configurations():
     assert lanes_75m["aggressive_seq256_zero0_gacc4"].batch_size == 16
     assert lanes_75m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 18000.0
 
+    lanes_130m = get_lanes_for_model("large_130m")
+    assert "aggressive_seq256_zero0_gacc4" in lanes_130m
+    assert lanes_130m["aggressive_seq256_zero0_gacc4"].batch_size == 12
+    assert lanes_130m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 14000.0
+
     lanes_250m = get_lanes_for_model("xlarge_250m")
     assert "aggressive_seq256_zero0_gacc4" in lanes_250m
     assert lanes_250m["aggressive_seq256_zero0_gacc4"].batch_size == 8
-    assert lanes_250m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 8000.0
+    assert lanes_250m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 6000.0
 
 
 def test_adaptive_lane_runner_transitions():
@@ -50,28 +55,31 @@ def test_adaptive_lane_runner_transitions():
         )
         assert runner.current_lane.name == "aggressive_seq256_zero0_gacc4"
 
-        # Demotion evaluation: window throughput below floor (18k) for 2 bad windows
-        new_lane, reason, bad_cnt = runner.evaluate_lane_transition(
-            step=40,
+        # Demotion evaluation: window throughput below floor (18k) for 3 bad windows
+        new_lane, reason, bad_cnt, _ = runner.evaluate_lane_transition(
+            step=120,
             window_tokens_sec=14000.0,
             window_loss=5.0,
             optimizer_ratio=0.2,
             data_wait_ratio=0.1,
-            bad_windows=1,
+            bad_windows=2,
+            stable_windows=0,
         )
         assert new_lane is not None
         assert new_lane.name == "fast_seq256_zero0_gacc4"
         assert "Demoting" in reason
 
-        # Promotion evaluation: in safe lane with high throughput and low overhead
+        # Promotion evaluation: in safe lane with sustained stable throughput and low overhead
         runner.current_lane = runner.lanes["safe_seq256"]
-        new_lane, reason, _ = runner.evaluate_lane_transition(
-            step=80,
+        runner.last_switch_step = 0
+        new_lane, reason, _, _ = runner.evaluate_lane_transition(
+            step=200,
             window_tokens_sec=19000.0,
             window_loss=4.5,
             optimizer_ratio=0.25,
             data_wait_ratio=0.1,
             bad_windows=0,
+            stable_windows=3,
         )
         assert new_lane is not None
         assert new_lane.name == "fast_seq256_zero0_gacc4"
