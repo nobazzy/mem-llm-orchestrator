@@ -344,7 +344,10 @@ class AdaptiveLaneRunner:
         loss_last = None
 
         if resume_from_checkpoint:
-            ckpt_path = resume_from_checkpoint if isinstance(resume_from_checkpoint, (str, Path)) else self.checkpoint_manager.latest_checkpoint_path()
+            if isinstance(resume_from_checkpoint, (str, Path)) and str(resume_from_checkpoint).lower() != "latest":
+                ckpt_path = Path(resume_from_checkpoint)
+            else:
+                ckpt_path = self.checkpoint_manager.latest_checkpoint_path()
             if ckpt_path and Path(ckpt_path).exists():
                 print(f"  -> Carregando checkpoint: {ckpt_path}")
                 ckpt_payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
