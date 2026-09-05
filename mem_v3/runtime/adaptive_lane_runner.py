@@ -67,17 +67,17 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
         return {
             "ultra_peak_seq256": LaneConfig(
                 name="ultra_peak_seq256",
-                batch_size=24,
+                batch_size=18,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
-                min_tokens_floor=18000.0,
-                expected_peak_tokens=45000.0,
+                min_tokens_floor=16000.0,
+                expected_peak_tokens=42000.0,
                 precision="fp16",
                 notes="Ultra-peak saturation lane for 8GB GPU",
             ),
             "aggressive_seq256_zero0_gacc4": LaneConfig(
                 name="aggressive_seq256_zero0_gacc4",
-                batch_size=16,
+                batch_size=14,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
                 min_tokens_floor=12000.0,
@@ -309,6 +309,9 @@ class AdaptiveLaneRunner:
         resume_from_checkpoint: Optional[str | Path | bool] = None,
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if device.type == "cuda":
+            torch.backends.cudnn.benchmark = True
+            torch.cuda.empty_cache()
         use_amp = (device.type == "cuda")
         amp_dtype = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else torch.float16
 
@@ -549,6 +552,10 @@ class AdaptiveLaneRunner:
                         batcher.batch_size = new_lane.batch_size
                         batcher._target_buffer = (batcher.sequence_length + 1) * batcher.batch_size * 16
                         batcher._refill_watermark = (batcher.sequence_length + 1) * batcher.batch_size * 4
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            import gc
+                            gc.collect()
                         self._log_event("lane_switched", {
                             "from_lane": old_lane_name,
                             "to_lane": new_lane.name,
