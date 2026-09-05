@@ -136,6 +136,9 @@ class RealDatasetBatcher:
         self.device = device
         self.chaos_profile = chaos_profile
         self.dataset_mix = dataset_mix
+        self.fallback_name = fallback_name
+        self.split = split
+        self.streaming = streaming
         self.dataset_type = str(os.environ.get("MEM_DATASET_TYPE", "huggingface")).strip().lower()
         self.text_field = str(os.environ.get("MEM_DATASET_TEXT_FIELD", "")).strip()
         self.data_files = str(os.environ.get("MEM_DATASET_DATA_FILES", "")).strip()
@@ -314,6 +317,17 @@ class RealDatasetBatcher:
         else:
             raise RuntimeError("Dataset iterator exhausted and no restart factory is available")
 
+    def _switch_to_fallback(self, reason: str) -> None:
+        self.info.fallback_used = True
+        self.info.fallback_reason = str(reason)[-500:]
+        self.info.active_dataset = self.fallback_name
+        self.info.active_config = ""
+        self.info.dataset_source = "huggingface_fallback"
+        from datasets import load_dataset
+        self.dataset = self._load_hf(load_dataset, self.fallback_name, "", self.split, self.streaming)
+        self.iterator = iter(self.dataset)
+        self._iterator_factory = lambda: iter(self.dataset)
+
     def _next_row(self) -> Dict[str, Any]:
         if self.iterators:
             attempts = max(1, len(self.iterators) * 2)
@@ -343,10 +357,18 @@ class RealDatasetBatcher:
                 return next(self.iterator)
             except StopIteration:
                 if self.dataset_exhaustions >= self.max_exhaustions:
+                    if not self.info.fallback_used and self.fallback_name:
+                        self._switch_to_fallback("Exhaustion limit reached")
+                        continue
                     raise RuntimeError(
                         "Dataset iterator exhausted repeatedly before enough valid tokens were produced. "
                         "Check dataset path/text_field or provide more valid text rows."
                     )
+                self._restart_single_iterator()
+            except Exception as exc:
+                if not self.info.fallback_used and self.fallback_name:
+                    self._switch_to_fallback(f"Streaming network error: {type(exc).__name__}: {exc}")
+                    continue
                 self._restart_single_iterator()
 
     @staticmethod
