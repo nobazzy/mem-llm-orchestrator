@@ -255,9 +255,35 @@ class RealDatasetBatcher:
             dataset_source=dataset_source,
         )
 
-        self._queue: queue.Queue[List[int]] = queue.Queue(maxsize=150)
-        self._stop_event = threading.Event()
         self._iterator_lock = threading.Lock()
+        self._queue: queue.Queue[List[int]] = queue.Queue(maxsize=200)
+        self._stop_event = threading.Event()
+
+        # Pre-fill initial buffer synchronously
+        target_prewarm = (self.sequence_length + 1) * self.batch_size * max(8, self.prefetch_batches)
+        if len(self.buffer) < target_prewarm:
+            self._extend_from_cache(target_prewarm - len(self.buffer))
+        while len(self.buffer) < target_prewarm:
+            try:
+                row = self._next_row()
+                text = self._text_from_row(row)
+                if not text:
+                    continue
+                ids = self.tokenizer.encode(
+                    text,
+                    add_special_tokens=False,
+                    truncation=True,
+                    max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
+                )
+                if ids:
+                    ids = [int(x) for x in ids]
+                    self.buffer.extend(ids)
+                    self._append_to_cache(ids)
+                    self.info.samples_seen += 1
+                    self._sync_info_counters()
+            except Exception:
+                break
+
         self._worker_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
         self._worker_thread.start()
 
@@ -485,8 +511,8 @@ class RealDatasetBatcher:
         if len(self.buffer) < target_tokens:
             self._extend_from_cache(target_tokens - len(self.buffer))
 
-        min_needed = (self.sequence_length + 1) * self.batch_size
-        while len(self.buffer) < target_tokens:
+        # Drain queue non-blockingly
+        while not self._queue.empty() and len(self.buffer) < target_tokens:
             try:
                 ids = self._queue.get_nowait()
                 self.buffer.extend(ids)
@@ -494,18 +520,35 @@ class RealDatasetBatcher:
                 self.info.samples_seen += 1
                 self._sync_info_counters()
             except queue.Empty:
-                if len(self.buffer) >= min_needed:
-                    break
+                break
+
+        # If buffer is under 1 batch, wait on queue or read directly
+        min_needed = (self.sequence_length + 1) * self.batch_size
+        while len(self.buffer) < min_needed and not self._stop_event.is_set():
+            try:
+                ids = self._queue.get(timeout=2.0)
+                self.buffer.extend(ids)
+                self._append_to_cache(ids)
+                self.info.samples_seen += 1
+                self._sync_info_counters()
+            except queue.Empty:
                 try:
-                    ids = self._queue.get(timeout=2.0)
-                    self.buffer.extend(ids)
-                    self._append_to_cache(ids)
-                    self.info.samples_seen += 1
-                    self._sync_info_counters()
-                except queue.Empty:
-                    if not self.info.fallback_used and self.fallback_name:
-                        self._switch_to_fallback("Streaming queue wait timeout")
-                    time.sleep(0.01)
+                    row = self._next_row()
+                    text = self._text_from_row(row)
+                    if text:
+                        ids = self.tokenizer.encode(
+                            text,
+                            add_special_tokens=False,
+                            truncation=True,
+                            max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
+                        )
+                        if ids:
+                            ids = [int(x) for x in ids]
+                            self.buffer.extend(ids)
+                            self._append_to_cache(ids)
+                            self.info.samples_seen += 1
+                            self._sync_info_counters()
+                except Exception:
                     break
 
     def close(self) -> None:
