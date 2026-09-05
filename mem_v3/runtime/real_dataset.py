@@ -10,6 +10,20 @@ import hashlib
 from pathlib import Path
 import torch
 
+# Configure Windows native SSL certificates & sanitize cert environment
+for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
+    _val = os.environ.get(_ca_env)
+    if _val and not os.path.exists(_val):
+        os.environ.pop(_ca_env, None)
+
+try:
+    import truststore
+    truststore.inject_into_ssl()
+    import urllib3.util.ssl_
+    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
+except Exception:
+    pass
+
 
 @dataclass
 class DatasetRuntimeInfo:
@@ -254,7 +268,10 @@ class RealDatasetBatcher:
     def _load_hf(load_dataset: Any, name: str, config: str, split: str, streaming: bool) -> Iterable[Dict[str, Any]]:
         kwargs: Dict[str, Any] = {"split": split, "streaming": streaming}
         if config:
-            return load_dataset(name, config, **kwargs)
+            try:
+                return load_dataset(name, config, **kwargs)
+            except (ValueError, KeyError):
+                return load_dataset(name, **kwargs)
         return load_dataset(name, **kwargs)
 
     def _iter_local_jsonl(self, path: Path) -> Iterator[Dict[str, Any]]:

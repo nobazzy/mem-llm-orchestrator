@@ -7,10 +7,17 @@ import sys
 import time
 from pathlib import Path
 
-# Enable native Windows SSL truststore
+# Configure Windows native SSL certificates & sanitize cert environment
+for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
+    _val = os.environ.get(_ca_env)
+    if _val and not os.path.exists(_val):
+        os.environ.pop(_ca_env, None)
+
 try:
     import truststore
     truststore.inject_into_ssl()
+    import urllib3.util.ssl_
+    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
 except Exception:
     pass
 
@@ -30,8 +37,9 @@ def main() -> None:
     parser.add_argument("--target-steps", type=int, default=1000000)
     parser.add_argument("--start-lane", default="aggressive_seq256_zero0_gacc4")
     parser.add_argument("--dataset-name", default="DKYoon/SlimPajama-6B")
+    parser.add_argument("--dataset-config", default="")
     parser.add_argument("--dataset-fallback-name", default="roneneldan/TinyStories")
-    parser.add_argument("--model-preset", default="medium_75m")
+    parser.add_argument("--model-preset", default="large_130m")
     parser.add_argument("--precision", default="fp16")
     args = parser.parse_args()
 
@@ -101,6 +109,7 @@ def main() -> None:
     result = runner.train_loop(
         total_steps=args.steps,
         dataset_name=args.dataset_name,
+        dataset_config=args.dataset_config,
         fallback_name=args.dataset_fallback_name,
         model_preset=args.model_preset,
         checkpoint_interval=500,

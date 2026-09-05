@@ -280,6 +280,7 @@ class AdaptiveLaneRunner:
         *,
         total_steps: int,
         dataset_name: str,
+        dataset_config: str = "",
         fallback_name: str = "roneneldan/TinyStories",
         model_preset: str = "medium_75m",
         checkpoint_interval: int = 500,
@@ -291,7 +292,7 @@ class AdaptiveLaneRunner:
 
         batcher = RealDatasetBatcher(
             dataset_name=dataset_name,
-            dataset_config="sample-10BT",
+            dataset_config=dataset_config,
             fallback_name=fallback_name,
             split="train",
             streaming=True,
