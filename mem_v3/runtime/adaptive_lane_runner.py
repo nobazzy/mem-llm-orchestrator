@@ -324,6 +324,15 @@ class AdaptiveLaneRunner:
             "model_preset": model_preset,
             "dataset": dataset_name,
         })
+        self._update_controller_status(
+            step=0,
+            target_steps=total_steps,
+            tokens_per_sec=0.0,
+            loss=0.0,
+            state="INITIALIZING",
+            reason="Warmup and buffer initialization",
+            efficiency_score=1.0,
+        )
 
         window_start_time = time.perf_counter()
         window_tokens = 0
@@ -376,7 +385,7 @@ class AdaptiveLaneRunner:
             total_step_time = time.perf_counter() - t_step_start
             step_durations.append(total_step_time)
 
-            if step % eval_window_steps == 0 or step == total_steps:
+            if step % eval_window_steps == 0 or step == total_steps or step == 1:
                 window_elapsed = max(time.perf_counter() - window_start_time, 1e-6)
                 win_tok_sec = window_tokens / window_elapsed
                 win_step_sec = window_steps / window_elapsed
@@ -434,38 +443,39 @@ class AdaptiveLaneRunner:
                     efficiency_score=efficiency_score,
                 )
 
-                new_lane, trans_reason, bad_windows, stable_windows = self.evaluate_lane_transition(
-                    step=step,
-                    window_tokens_sec=win_tok_sec,
-                    window_loss=avg_win_loss,
-                    optimizer_ratio=avg_opt_ratio,
-                    data_wait_ratio=avg_data_ratio,
-                    bad_windows=bad_windows,
-                    stable_windows=stable_windows,
-                )
-
-                if new_lane is not None and new_lane.name != self.current_lane.name:
-                    old_lane_name = self.current_lane.name
-                    self.current_lane = new_lane
-                    batcher.batch_size = new_lane.batch_size
-                    self._log_event("lane_switched", {
-                        "from_lane": old_lane_name,
-                        "to_lane": new_lane.name,
-                        "step": step,
-                        "reason": trans_reason,
-                        "trigger_tokens_sec": round(win_tok_sec, 1),
-                        "new_batch_size": new_lane.batch_size,
-                        "new_gradient_accumulation": new_lane.gradient_accumulation_steps,
-                    })
-                    self._update_controller_status(
+                if step >= eval_window_steps:
+                    new_lane, trans_reason, bad_windows, stable_windows = self.evaluate_lane_transition(
                         step=step,
-                        target_steps=total_steps,
-                        tokens_per_sec=win_tok_sec,
-                        loss=loss_val,
-                        state="LANE_SWITCHED",
-                        reason=trans_reason,
-                        efficiency_score=efficiency_score,
+                        window_tokens_sec=win_tok_sec,
+                        window_loss=avg_win_loss,
+                        optimizer_ratio=avg_opt_ratio,
+                        data_wait_ratio=avg_data_ratio,
+                        bad_windows=bad_windows,
+                        stable_windows=stable_windows,
                     )
+
+                    if new_lane is not None and new_lane.name != self.current_lane.name:
+                        old_lane_name = self.current_lane.name
+                        self.current_lane = new_lane
+                        batcher.batch_size = new_lane.batch_size
+                        self._log_event("lane_switched", {
+                            "from_lane": old_lane_name,
+                            "to_lane": new_lane.name,
+                            "step": step,
+                            "reason": trans_reason,
+                            "trigger_tokens_sec": round(win_tok_sec, 1),
+                            "new_batch_size": new_lane.batch_size,
+                            "new_gradient_accumulation": new_lane.gradient_accumulation_steps,
+                        })
+                        self._update_controller_status(
+                            step=step,
+                            target_steps=total_steps,
+                            tokens_per_sec=win_tok_sec,
+                            loss=loss_val,
+                            state="LANE_SWITCHED",
+                            reason=trans_reason,
+                            efficiency_score=efficiency_score,
+                        )
 
                 window_start_time = time.perf_counter()
                 window_tokens = 0
