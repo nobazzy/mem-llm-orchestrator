@@ -322,60 +322,58 @@ class RealDatasetBatcher:
             raise RuntimeError("Dataset iterator exhausted and no restart factory is available")
 
     def _switch_to_fallback(self, reason: str) -> None:
-        with self._iterator_lock:
-            self.info.fallback_used = True
-            self.info.fallback_reason = str(reason)[-500:]
-            self.info.active_dataset = self.fallback_name
-            self.info.active_config = ""
-            self.info.dataset_source = "huggingface_fallback"
-            from datasets import load_dataset
-            self.dataset = self._load_hf(load_dataset, self.fallback_name, "", self.split, self.streaming)
-            self.iterator = iter(self.dataset)
-            self._iterator_factory = lambda: iter(self.dataset)
+        self.info.fallback_used = True
+        self.info.fallback_reason = str(reason)[-500:]
+        self.info.active_dataset = self.fallback_name
+        self.info.active_config = ""
+        self.info.dataset_source = "huggingface_fallback"
+        from datasets import load_dataset
+        self.dataset = self._load_hf(load_dataset, self.fallback_name, "", self.split, self.streaming)
+        self.iterator = iter(self.dataset)
+        self._iterator_factory = lambda: iter(self.dataset)
 
     def _next_row(self) -> Dict[str, Any]:
-        with self._iterator_lock:
-            if self.iterators:
-                attempts = max(1, len(self.iterators) * 2)
-                last_exc: Optional[BaseException] = None
-                for _ in range(attempts):
-                    idx = self._mix_index % len(self.iterators)
-                    self._mix_index += 1
-                    self.info.active_dataset_index = idx
+        if self.iterators:
+            attempts = max(1, len(self.iterators) * 2)
+            last_exc: Optional[BaseException] = None
+            for _ in range(attempts):
+                idx = self._mix_index % len(self.iterators)
+                self._mix_index += 1
+                self.info.active_dataset_index = idx
+                try:
+                    return next(self.iterators[idx])
+                except StopIteration as exc:
+                    last_exc = exc
+                    self.dataset_exhaustions += 1
+                    self.iterator_restarts += 1
+                    self.info.dataset_exhaustions = self.dataset_exhaustions
+                    self.info.iterator_restarts = self.iterator_restarts
+                    self.iterators[idx] = iter(self.datasets[idx])
                     try:
                         return next(self.iterators[idx])
-                    except StopIteration as exc:
-                        last_exc = exc
-                        self.dataset_exhaustions += 1
-                        self.iterator_restarts += 1
-                        self.info.dataset_exhaustions = self.dataset_exhaustions
-                        self.info.iterator_restarts = self.iterator_restarts
-                        self.iterators[idx] = iter(self.datasets[idx])
-                        try:
-                            return next(self.iterators[idx])
-                        except StopIteration as exc2:
-                            last_exc = exc2
-                            continue
-                raise RuntimeError(f"Dataset mix produced no rows after restart attempts: {last_exc}")
-
-            while True:
-                try:
-                    return next(self.iterator)
-                except StopIteration:
-                    if self.dataset_exhaustions >= self.max_exhaustions:
-                        if not self.info.fallback_used and self.fallback_name:
-                            self._switch_to_fallback("Exhaustion limit reached")
-                            continue
-                        raise RuntimeError(
-                            "Dataset iterator exhausted repeatedly before enough valid tokens were produced. "
-                            "Check dataset path/text_field or provide more valid text rows."
-                        )
-                    self._restart_single_iterator()
-                except Exception as exc:
-                    if not self.info.fallback_used and self.fallback_name:
-                        self._switch_to_fallback(f"Streaming network error: {type(exc).__name__}: {exc}")
+                    except StopIteration as exc2:
+                        last_exc = exc2
                         continue
-                    self._restart_single_iterator()
+            raise RuntimeError(f"Dataset mix produced no rows after restart attempts: {last_exc}")
+
+        while True:
+            try:
+                return next(self.iterator)
+            except StopIteration:
+                if self.dataset_exhaustions >= self.max_exhaustions:
+                    if not self.info.fallback_used and self.fallback_name:
+                        self._switch_to_fallback("Exhaustion limit reached")
+                        continue
+                    raise RuntimeError(
+                        "Dataset iterator exhausted repeatedly before enough valid tokens were produced. "
+                        "Check dataset path/text_field or provide more valid text rows."
+                    )
+                self._restart_single_iterator()
+            except Exception as exc:
+                if not self.info.fallback_used and self.fallback_name:
+                    self._switch_to_fallback(f"Streaming network error: {type(exc).__name__}: {exc}")
+                    continue
+                self._restart_single_iterator()
 
     @staticmethod
     def _text_from_row(row: Dict[str, Any]) -> str:
