@@ -70,7 +70,7 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
                 batch_size=24,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
-                min_tokens_floor=24000.0,
+                min_tokens_floor=18000.0,
                 expected_peak_tokens=45000.0,
                 precision="fp16",
                 notes="Ultra-peak saturation lane for 8GB GPU",
@@ -80,7 +80,7 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
                 batch_size=16,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
-                min_tokens_floor=18000.0,
+                min_tokens_floor=12000.0,
                 expected_peak_tokens=35000.0,
                 precision="fp16",
                 notes="Primary 130M high-throughput lane",
@@ -90,7 +90,7 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
                 batch_size=12,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
-                min_tokens_floor=12000.0,
+                min_tokens_floor=8000.0,
                 expected_peak_tokens=28000.0,
                 precision="fp16",
                 notes="Fast intermediate 130M lane",
@@ -100,7 +100,7 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
                 batch_size=8,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
-                min_tokens_floor=6000.0,
+                min_tokens_floor=5000.0,
                 expected_peak_tokens=18000.0,
                 precision="fp16",
                 notes="Conservative recovery 130M lane",
@@ -167,7 +167,7 @@ class AdaptiveLaneRunner:
         self.controller_status_file = self.evidence_dir.parent / "v89_controller_status_latest.json"
         self.lane_history: List[Dict[str, Any]] = []
         self.last_switch_step = 0
-        self.min_switch_cooldown_steps = 100
+        self.min_switch_cooldown_steps = 300
 
     def _log_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         entry = {
@@ -261,11 +261,11 @@ class AdaptiveLaneRunner:
         if data_wait_ratio > 0.35:
             reasons.append("data_wait_severe")
 
-        # Demotion logic (requires 3 consecutive bad windows)
+        # Demotion logic (requires 5 consecutive bad windows)
         if "below_lane_min_tokens" in reasons:
             bad_windows += 1
             stable_windows = 0
-            if bad_windows >= 3:
+            if bad_windows >= 5:
                 if current.name == "ultra_peak_seq256" and "aggressive_seq256_zero0_gacc4" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["aggressive_seq256_zero0_gacc4"], f"Demoting to aggressive: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
@@ -279,21 +279,18 @@ class AdaptiveLaneRunner:
             bad_windows = max(0, bad_windows - 1)
             stable_windows += 1
 
-        # Promotion logic (requires 3 consecutive stable windows above threshold and healthy VRAM)
-        if stable_windows >= 3 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5500.0:
+        # Promotion logic (requires 5 consecutive stable windows above threshold and healthy VRAM)
+        if stable_windows >= 5 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5500.0:
             if current.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
-                fast_floor = self.lanes["fast_seq256_zero0_gacc4"].min_tokens_floor
-                if window_tokens_sec >= (fast_floor * 0.9):
+                if window_tokens_sec >= 18000.0:
                     self.last_switch_step = step
                     return self.lanes["fast_seq256_zero0_gacc4"], f"Promoting to fast lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
             elif current.name == "fast_seq256_zero0_gacc4" and "aggressive_seq256_zero0_gacc4" in self.lanes:
-                agg_floor = self.lanes["aggressive_seq256_zero0_gacc4"].min_tokens_floor
-                if window_tokens_sec >= (agg_floor * 0.9):
+                if window_tokens_sec >= 24000.0:
                     self.last_switch_step = step
                     return self.lanes["aggressive_seq256_zero0_gacc4"], f"Promoting to aggressive lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
             elif current.name == "aggressive_seq256_zero0_gacc4" and "ultra_peak_seq256" in self.lanes:
-                ultra_floor = self.lanes["ultra_peak_seq256"].min_tokens_floor
-                if window_tokens_sec >= (ultra_floor * 0.9):
+                if window_tokens_sec >= 32000.0:
                     self.last_switch_step = step
                     return self.lanes["ultra_peak_seq256"], f"Promoting to ultra-peak lane: sustained throughput {window_tokens_sec:.0f} tok/s on 8GB GPU", 0, 0
 
@@ -308,7 +305,7 @@ class AdaptiveLaneRunner:
         fallback_name: str = "roneneldan/TinyStories",
         model_preset: str = "medium_75m",
         checkpoint_interval: int = 500,
-        eval_window_steps: int = 20,
+        eval_window_steps: int = 50,
         resume_from_checkpoint: Optional[str | Path | bool] = None,
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

@@ -35,7 +35,7 @@ def test_get_lanes_for_model_configurations():
     assert lanes_130m["ultra_peak_seq256"].batch_size == 24
     assert "aggressive_seq256_zero0_gacc4" in lanes_130m
     assert lanes_130m["aggressive_seq256_zero0_gacc4"].batch_size == 16
-    assert lanes_130m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 18000.0
+    assert lanes_130m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 12000.0
 
     lanes_250m = get_lanes_for_model("xlarge_250m")
     assert "aggressive_seq256_zero0_gacc4" in lanes_250m
@@ -57,14 +57,14 @@ def test_adaptive_lane_runner_transitions():
         )
         assert runner.current_lane.name == "aggressive_seq256_zero0_gacc4"
 
-        # Demotion evaluation: window throughput below floor (18k) for 3 bad windows
+        # Demotion evaluation: window throughput below floor (18k) for 5 bad windows
         new_lane, reason, bad_cnt, _ = runner.evaluate_lane_transition(
-            step=120,
+            step=350,
             window_tokens_sec=14000.0,
             window_loss=5.0,
             optimizer_ratio=0.2,
             data_wait_ratio=0.1,
-            bad_windows=2,
+            bad_windows=4,
             stable_windows=0,
         )
         assert new_lane is not None
@@ -75,13 +75,13 @@ def test_adaptive_lane_runner_transitions():
         runner.current_lane = runner.lanes["safe_seq256"]
         runner.last_switch_step = 0
         new_lane, reason, _, _ = runner.evaluate_lane_transition(
-            step=200,
+            step=400,
             window_tokens_sec=19000.0,
             window_loss=4.5,
             optimizer_ratio=0.25,
             data_wait_ratio=0.1,
             bad_windows=0,
-            stable_windows=3,
+            stable_windows=5,
         )
         assert new_lane is not None
         assert new_lane.name == "fast_seq256_zero0_gacc4"

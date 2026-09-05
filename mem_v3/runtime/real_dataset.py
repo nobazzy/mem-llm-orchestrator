@@ -401,6 +401,39 @@ class RealDatasetBatcher:
         except Exception:
             return 0
 
+    def _get_next_cache_chunk(self, count: int):
+        if self.cache_mode not in {"memmap", "disk", "aggressive"}:
+            return None
+        available = self._cache_available_tokens()
+        if available < count:
+            try:
+                if self.cache_path.exists() and (self.cache_path.stat().st_size // 4) >= count:
+                    self.cache_read_pos = 0
+                    self.iterator_restarts += 1
+                    available = self._cache_available_tokens()
+                else:
+                    return None
+            except Exception:
+                return None
+        if available < count:
+            return None
+        try:
+            import numpy as np
+            if getattr(self, "_active_memmap", None) is None or getattr(self, "_active_memmap_path", None) != str(self.cache_path):
+                self._active_memmap = np.memmap(str(self.cache_path), mode="r", dtype="int32")
+                self._active_memmap_path = str(self.cache_path)
+            chunk = self._active_memmap[self.cache_read_pos : self.cache_read_pos + count].astype("int64", copy=True)
+            self.cache_read_pos += count
+            try:
+                self._mem_v89_save_cache_read_pos()
+            except Exception:
+                pass
+            self.cache_reads += 1
+            self.cache_tokens_read += int(count)
+            return chunk
+        except Exception:
+            return None
+
     def _extend_from_cache(self, need_tokens: int) -> int:
         if self.cache_mode not in {"memmap", "disk", "aggressive"}:
             return 0
@@ -505,10 +538,19 @@ class RealDatasetBatcher:
         }
 
     def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        total = self.batch_size * (self.sequence_length + 1)
+        cache_chunk = self._get_next_cache_chunk(total)
+        if cache_chunk is not None:
+            data = torch.from_numpy(cache_chunk).view(self.batch_size, self.sequence_length + 1)
+            self.info.tokens_emitted += int(data.numel())
+            self._sync_info_counters()
+            x = data[:, :-1].to(self.device, non_blocking=True)
+            y = data[:, 1:].to(self.device, non_blocking=True)
+            return x, y
+
         refill_watermark = getattr(self, "_refill_watermark", (self.sequence_length + 1) * self.batch_size * 4)
         if len(self.buffer) < refill_watermark:
             self._extend_buffer()
-        total = self.batch_size * (self.sequence_length + 1)
         if len(self.buffer) < total:
             self._extend_buffer()
         if len(self.buffer) < total:
