@@ -41,7 +41,13 @@ def main() -> None:
     parser.add_argument("--dataset-fallback-name", default="roneneldan/TinyStories")
     parser.add_argument("--model-preset", default="large_130m")
     parser.add_argument("--precision", default="fp16")
+    parser.add_argument("--resume-checkpoint", default=None, help="Path to checkpoint or 'latest'")
+    parser.add_argument("--resume-latest", action="store_true", help="Resume automatically from latest checkpoint")
     args = parser.parse_args()
+
+    resume_target = args.resume_checkpoint
+    if args.resume_latest and not resume_target:
+        resume_target = "latest"
 
     import torch
     device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
@@ -53,7 +59,8 @@ def main() -> None:
     print(f"  Dispositivo: {device_name} (Aceleração AMP: {effective_precision.upper()})")
     print(f"  Target: {args.target_steps:,} steps | Start Lane: {args.start_lane}")
     print(f"  Dataset: {args.dataset_name} (Streaming) [Fallback: {args.dataset_fallback_name}]")
-    print(f"  Modelo: {args.model_preset} (~72M parâmetros — SDPA Flash Attention)")
+    print(f"  Modelo: {args.model_preset} (~130M parâmetros — SDPA Flash Attention)")
+    print(f"  Resume Checkpoint: {resume_target if resume_target else 'Não (Início do zero)'}")
     print(f"  OpenAI API Key: {'PRESENTE (' + api_key[:10] + '...)' if api_key else 'AUSENTE'}")
     print("============================================================\n")
 
@@ -114,6 +121,7 @@ def main() -> None:
         model_preset=args.model_preset,
         checkpoint_interval=500,
         eval_window_steps=20,
+        resume_from_checkpoint=resume_target,
     )
 
     print("\n============================================================")

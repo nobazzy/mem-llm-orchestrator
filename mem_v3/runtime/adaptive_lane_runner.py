@@ -65,33 +65,43 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
 
     if model_preset in {"large_130m", "decoder_130m", "130m_decoder", "130m", "medium_100m"}:
         return {
+            "ultra_peak_seq256": LaneConfig(
+                name="ultra_peak_seq256",
+                batch_size=28,
+                sequence_length=256,
+                gradient_accumulation_steps=1,
+                min_tokens_floor=32000.0,
+                expected_peak_tokens=55000.0,
+                precision="fp16",
+                notes="Ultra-peak saturation lane for 8GB GPU",
+            ),
             "aggressive_seq256_zero0_gacc4": LaneConfig(
                 name="aggressive_seq256_zero0_gacc4",
-                batch_size=12,
+                batch_size=20,
                 sequence_length=256,
-                gradient_accumulation_steps=2,
-                min_tokens_floor=12000.0,
-                expected_peak_tokens=35000.0,
+                gradient_accumulation_steps=1,
+                min_tokens_floor=24000.0,
+                expected_peak_tokens=40000.0,
                 precision="fp16",
-                notes="Primary 130M agile high-frequency lane",
+                notes="Primary 130M high-throughput lane",
             ),
             "fast_seq256_zero0_gacc4": LaneConfig(
                 name="fast_seq256_zero0_gacc4",
+                batch_size=12,
+                sequence_length=256,
+                gradient_accumulation_steps=2,
+                min_tokens_floor=16000.0,
+                expected_peak_tokens=28000.0,
+                precision="fp16",
+                notes="Fast intermediate 130M lane",
+            ),
+            "safe_seq256": LaneConfig(
+                name="safe_seq256",
                 batch_size=8,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
                 min_tokens_floor=8000.0,
-                expected_peak_tokens=25000.0,
-                precision="fp16",
-                notes="Fast fallback 130M lane",
-            ),
-            "safe_seq256": LaneConfig(
-                name="safe_seq256",
-                batch_size=4,
-                sequence_length=256,
-                gradient_accumulation_steps=2,
-                min_tokens_floor=4000.0,
-                expected_peak_tokens=15000.0,
+                expected_peak_tokens=20000.0,
                 precision="fp16",
                 notes="Conservative recovery 130M lane",
             ),
@@ -157,7 +167,7 @@ class AdaptiveLaneRunner:
         self.controller_status_file = self.evidence_dir.parent / "v89_controller_status_latest.json"
         self.lane_history: List[Dict[str, Any]] = []
         self.last_switch_step = 0
-        self.min_switch_cooldown_steps = 100
+        self.min_switch_cooldown_steps = 60
 
     def _log_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         entry = {
@@ -233,6 +243,12 @@ class AdaptiveLaneRunner:
         """Evaluates whether to switch lane (Promotion or Demotion) with anti-flapping hysteresis."""
         current = self.current_lane
 
+        # Check VRAM headroom for 8GB GPU
+        vram_alloc_mb = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
+        if vram_alloc_mb > 6500.0 and current.name != "safe_seq256" and "safe_seq256" in self.lanes:
+            self.last_switch_step = step
+            return self.lanes["safe_seq256"], f"Emergency VRAM Demotion: {vram_alloc_mb:.0f} MB > 6500 MB ceiling (Zero-OOM Guard)", 0, 0
+
         # Cooldown guard: prevent flapping within cooldown window
         if (step - self.last_switch_step) < self.min_switch_cooldown_steps:
             return None, "cooldown_active", bad_windows, stable_windows
@@ -245,33 +261,41 @@ class AdaptiveLaneRunner:
         if data_wait_ratio > 0.35:
             reasons.append("data_wait_severe")
 
-        # Demotion logic (requires 3 consecutive bad windows)
+        # Demotion logic (requires 2 consecutive bad windows)
         if "below_lane_min_tokens" in reasons:
             bad_windows += 1
             stable_windows = 0
-            if bad_windows >= 3:
-                if current.name == "aggressive_seq256_zero0_gacc4":
+            if bad_windows >= 2:
+                if current.name == "ultra_peak_seq256" and "aggressive_seq256_zero0_gacc4" in self.lanes:
+                    self.last_switch_step = step
+                    return self.lanes["aggressive_seq256_zero0_gacc4"], f"Demoting to aggressive: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
+                elif current.name == "aggressive_seq256_zero0_gacc4" and "fast_seq256_zero0_gacc4" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["fast_seq256_zero0_gacc4"], f"Demoting to fast fallback: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
-                elif current.name == "fast_seq256_zero0_gacc4":
+                elif current.name == "fast_seq256_zero0_gacc4" and "safe_seq256" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["safe_seq256"], f"Demoting to safe recovery: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
         else:
             bad_windows = max(0, bad_windows - 1)
             stable_windows += 1
 
-        # Promotion logic (requires 3 consecutive stable windows above threshold)
-        if stable_windows >= 3 and optimizer_ratio <= 0.32:
+        # Promotion logic (requires 2 consecutive stable windows above threshold and healthy VRAM)
+        if stable_windows >= 2 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5500.0:
             if current.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
                 fast_floor = self.lanes["fast_seq256_zero0_gacc4"].min_tokens_floor
-                if window_tokens_sec >= (fast_floor * 0.9):
+                if window_tokens_sec >= (fast_floor * 0.85):
                     self.last_switch_step = step
                     return self.lanes["fast_seq256_zero0_gacc4"], f"Promoting to fast lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
             elif current.name == "fast_seq256_zero0_gacc4" and "aggressive_seq256_zero0_gacc4" in self.lanes:
                 agg_floor = self.lanes["aggressive_seq256_zero0_gacc4"].min_tokens_floor
-                if window_tokens_sec >= (agg_floor * 0.9):
+                if window_tokens_sec >= (agg_floor * 0.85):
                     self.last_switch_step = step
                     return self.lanes["aggressive_seq256_zero0_gacc4"], f"Promoting to aggressive lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
+            elif current.name == "aggressive_seq256_zero0_gacc4" and "ultra_peak_seq256" in self.lanes:
+                ultra_floor = self.lanes["ultra_peak_seq256"].min_tokens_floor
+                if window_tokens_sec >= (ultra_floor * 0.85):
+                    self.last_switch_step = step
+                    return self.lanes["ultra_peak_seq256"], f"Promoting to ultra-peak lane: sustained throughput {window_tokens_sec:.0f} tok/s on 8GB GPU", 0, 0
 
         return None, "keep_current_lane", bad_windows, stable_windows
 
@@ -285,6 +309,7 @@ class AdaptiveLaneRunner:
         model_preset: str = "medium_75m",
         checkpoint_interval: int = 500,
         eval_window_steps: int = 20,
+        resume_from_checkpoint: Optional[str | Path | bool] = None,
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         use_amp = (device.type == "cuda")
@@ -313,24 +338,46 @@ class AdaptiveLaneRunner:
         criterion = nn.CrossEntropyLoss()
 
         total_tokens_processed = 0
+        initial_step = 0
         start_time = time.perf_counter()
         loss_first = None
         loss_last = None
+
+        if resume_from_checkpoint:
+            ckpt_path = resume_from_checkpoint if isinstance(resume_from_checkpoint, (str, Path)) else self.checkpoint_manager.latest_checkpoint_path()
+            if ckpt_path and Path(ckpt_path).exists():
+                print(f"  -> Carregando checkpoint: {ckpt_path}")
+                ckpt_payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
+                model.load_state_dict(ckpt_payload["model_state_dict"])
+                if "optimizer_state_dict" in ckpt_payload and ckpt_payload["optimizer_state_dict"]:
+                    try:
+                        optimizer.load_state_dict(ckpt_payload["optimizer_state_dict"])
+                    except Exception:
+                        pass
+                meta = ckpt_payload.get("metadata", {})
+                initial_step = int(meta.get("step", 0))
+                total_tokens_processed = int(meta.get("tokens_processed", 0))
+                loss_val = float(meta.get("loss", 0.0))
+                loss_first = loss_val
+                loss_last = loss_val
+                print(f"  -> Checkpoint carregado! Retomando a partir do step {initial_step:,} ({total_tokens_processed:,} tokens, Loss: {loss_val:.4f}).")
 
         self._log_event("training_started", {
             "lane": self.current_lane.name,
             "batch_size": self.current_lane.batch_size,
             "target_steps": total_steps,
+            "initial_step": initial_step,
             "model_preset": model_preset,
             "dataset": dataset_name,
+            "resumed": bool(resume_from_checkpoint),
         })
         self._update_controller_status(
-            step=0,
+            step=initial_step,
             target_steps=total_steps,
             tokens_per_sec=0.0,
-            loss=0.0,
-            state="INITIALIZING",
-            reason="Warmup and buffer initialization",
+            loss=loss_last or 0.0,
+            state="RESUMED" if initial_step > 0 else "INITIALIZING",
+            reason=f"Resumed from step {initial_step}" if initial_step > 0 else "Warmup and buffer initialization",
             efficiency_score=1.0,
         )
 
@@ -344,7 +391,7 @@ class AdaptiveLaneRunner:
         bad_windows = 0
         stable_windows = 0
 
-        for step in range(1, total_steps + 1):
+        for step in range(initial_step + 1, total_steps + 1):
             t_step_start = time.perf_counter()
 
             t_data_start = time.perf_counter()
@@ -385,7 +432,7 @@ class AdaptiveLaneRunner:
             total_step_time = time.perf_counter() - t_step_start
             step_durations.append(total_step_time)
 
-            if step % eval_window_steps == 0 or step == total_steps or step == 1:
+            if step % eval_window_steps == 0 or step == total_steps or step == (initial_step + 1):
                 window_elapsed = max(time.perf_counter() - window_start_time, 1e-6)
                 win_tok_sec = window_tokens / window_elapsed
                 win_step_sec = window_steps / window_elapsed
@@ -443,16 +490,55 @@ class AdaptiveLaneRunner:
                     efficiency_score=efficiency_score,
                 )
 
-                if step >= eval_window_steps:
-                    new_lane, trans_reason, bad_windows, stable_windows = self.evaluate_lane_transition(
-                        step=step,
-                        window_tokens_sec=win_tok_sec,
-                        window_loss=avg_win_loss,
-                        optimizer_ratio=avg_opt_ratio,
-                        data_wait_ratio=avg_data_ratio,
-                        bad_windows=bad_windows,
-                        stable_windows=stable_windows,
-                    )
+                if step >= (initial_step + eval_window_steps):
+                    # Check for live dynamic control directive
+                    new_lane = None
+                    trans_reason = ""
+                    directive_file = self.evidence_dir / "control_directive.json"
+                    if not directive_file.exists():
+                        directive_file = self.evidence_dir.parent / "control_directive.json"
+                    if directive_file.exists():
+                        try:
+                            dir_data = json.loads(directive_file.read_text(encoding="utf-8"))
+                            directive_file.unlink(missing_ok=True)
+                            action = dir_data.get("action", "")
+                            target_lane = dir_data.get("target_lane", "")
+                            if action == "force_lane" and target_lane in self.lanes:
+                                new_lane = self.lanes[target_lane]
+                                trans_reason = f"External directive: forced switch to {target_lane}"
+                            elif action == "promote":
+                                if self.current_lane.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
+                                    new_lane = self.lanes["fast_seq256_zero0_gacc4"]
+                                    trans_reason = "External directive: force promotion to fast lane"
+                                elif self.current_lane.name == "fast_seq256_zero0_gacc4" and "aggressive_seq256_zero0_gacc4" in self.lanes:
+                                    new_lane = self.lanes["aggressive_seq256_zero0_gacc4"]
+                                    trans_reason = "External directive: force promotion to aggressive lane"
+                                elif self.current_lane.name == "aggressive_seq256_zero0_gacc4" and "ultra_peak_seq256" in self.lanes:
+                                    new_lane = self.lanes["ultra_peak_seq256"]
+                                    trans_reason = "External directive: force promotion to ultra-peak lane"
+                            elif action == "demote":
+                                if self.current_lane.name == "ultra_peak_seq256" and "aggressive_seq256_zero0_gacc4" in self.lanes:
+                                    new_lane = self.lanes["aggressive_seq256_zero0_gacc4"]
+                                    trans_reason = "External directive: force demotion to aggressive lane"
+                                elif self.current_lane.name == "aggressive_seq256_zero0_gacc4" and "fast_seq256_zero0_gacc4" in self.lanes:
+                                    new_lane = self.lanes["fast_seq256_zero0_gacc4"]
+                                    trans_reason = "External directive: force demotion to fast lane"
+                                elif self.current_lane.name == "fast_seq256_zero0_gacc4" and "safe_seq256" in self.lanes:
+                                    new_lane = self.lanes["safe_seq256"]
+                                    trans_reason = "External directive: force demotion to safe lane"
+                        except Exception:
+                            pass
+
+                    if new_lane is None:
+                        new_lane, trans_reason, bad_windows, stable_windows = self.evaluate_lane_transition(
+                            step=step,
+                            window_tokens_sec=win_tok_sec,
+                            window_loss=avg_win_loss,
+                            optimizer_ratio=avg_opt_ratio,
+                            data_wait_ratio=avg_data_ratio,
+                            bad_windows=bad_windows,
+                            stable_windows=stable_windows,
+                        )
 
                     if new_lane is not None and new_lane.name != self.current_lane.name:
                         old_lane_name = self.current_lane.name
@@ -503,9 +589,11 @@ class AdaptiveLaneRunner:
                     pass
 
         return {
-            "steps_completed": total_steps,
+            "steps_completed": step,
+            "target_steps": total_steps,
             "tokens_processed": total_tokens_processed,
             "loss_first": loss_first,
             "loss_last": loss_last,
             "lane_history": self.lane_history,
+            "final_lane": self.current_lane.name,
         }
