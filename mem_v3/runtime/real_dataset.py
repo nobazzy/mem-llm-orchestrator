@@ -247,6 +247,7 @@ class RealDatasetBatcher:
             fallback_reason=fallback_reason[-500:],
             tokenizer_name=tokenizer_name,
             vocab_size=self.vocab_size,
+            sequence_length=sequence_length,
             cache_mode=self.cache_mode,
             cache_path=str(self.cache_path),
             dataset_source=dataset_source,
