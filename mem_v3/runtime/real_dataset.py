@@ -247,45 +247,14 @@ class RealDatasetBatcher:
             fallback_reason=fallback_reason[-500:],
             tokenizer_name=tokenizer_name,
             vocab_size=self.vocab_size,
-            sequence_length=self.sequence_length,
-            chaos_profile=chaos_profile,
-            dataset_mix=(dataset_mix or ("data_files=" + self.data_files if self.data_files else "")),
             cache_mode=self.cache_mode,
             cache_path=str(self.cache_path),
             dataset_source=dataset_source,
         )
 
-        self._iterator_lock = threading.Lock()
-        self._queue: queue.Queue[List[int]] = queue.Queue(maxsize=200)
-        self._stop_event = threading.Event()
-
-        # Pre-fill initial buffer synchronously
-        target_prewarm = (self.sequence_length + 1) * self.batch_size * max(8, self.prefetch_batches)
-        if len(self.buffer) < target_prewarm:
-            self._extend_from_cache(target_prewarm - len(self.buffer))
-        while len(self.buffer) < target_prewarm:
-            try:
-                row = self._next_row()
-                text = self._text_from_row(row)
-                if not text:
-                    continue
-                ids = self.tokenizer.encode(
-                    text,
-                    add_special_tokens=False,
-                    truncation=True,
-                    max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
-                )
-                if ids:
-                    ids = [int(x) for x in ids]
-                    self.buffer.extend(ids)
-                    self._append_to_cache(ids)
-                    self.info.samples_seen += 1
-                    self._sync_info_counters()
-            except Exception:
-                break
-
-        self._worker_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
-        self._worker_thread.start()
+        self._target_buffer = (self.sequence_length + 1) * self.batch_size * max(16, self.prefetch_batches)
+        self._refill_watermark = (self.sequence_length + 1) * self.batch_size * 4
+        self._extend_buffer()
 
     @staticmethod
     def _parse_mix(spec: str) -> List[Tuple[str, str]]:
@@ -480,93 +449,43 @@ class RealDatasetBatcher:
         self.info.dataset_exhaustions = self.dataset_exhaustions
         self.info.empty_rows_seen = self.empty_rows_seen
 
-    def _prefetch_worker(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                row = self._next_row()
-                text = self._text_from_row(row)
-                if not text:
-                    continue
-                ids = self.tokenizer.encode(
-                    text,
-                    add_special_tokens=False,
-                    truncation=True,
-                    max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
-                )
-                if ids:
-                    ids = [int(x) for x in ids]
-                    while not self._stop_event.is_set():
-                        try:
-                            self._queue.put(ids, timeout=0.2)
-                            break
-                        except queue.Full:
-                            continue
-            except Exception as exc:
-                if not self.info.fallback_used and self.fallback_name:
-                    self._switch_to_fallback(f"Prefetch worker error: {type(exc).__name__}: {exc}")
-                time.sleep(0.1)
-
     def _extend_buffer(self) -> None:
-        target_tokens = (self.sequence_length + 1) * self.batch_size * self.prefetch_batches
-        if len(self.buffer) < target_tokens:
-            self._extend_from_cache(target_tokens - len(self.buffer))
+        target = getattr(self, "_target_buffer", (self.sequence_length + 1) * self.batch_size * 16)
+        if len(self.buffer) < target:
+            self._extend_from_cache(target - len(self.buffer))
 
-        # Drain queue non-blockingly
-        while not self._queue.empty() and len(self.buffer) < target_tokens:
-            try:
-                ids = self._queue.get_nowait()
-                self.buffer.extend(ids)
-                self._append_to_cache(ids)
-                self.info.samples_seen += 1
-                self._sync_info_counters()
-            except queue.Empty:
-                break
-
-        # If buffer is under 1 batch, wait on queue or read directly
-        min_needed = (self.sequence_length + 1) * self.batch_size
-        while len(self.buffer) < min_needed and not self._stop_event.is_set():
-            try:
-                ids = self._queue.get(timeout=2.0)
-                self.buffer.extend(ids)
-                self._append_to_cache(ids)
-                self.info.samples_seen += 1
-                self._sync_info_counters()
-            except queue.Empty:
-                try:
-                    row = self._next_row()
-                    text = self._text_from_row(row)
-                    if text:
-                        ids = self.tokenizer.encode(
-                            text,
-                            add_special_tokens=False,
-                            truncation=True,
-                            max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
-                        )
-                        if ids:
-                            ids = [int(x) for x in ids]
-                            self.buffer.extend(ids)
-                            self._append_to_cache(ids)
-                            self.info.samples_seen += 1
-                            self._sync_info_counters()
-                except Exception:
+        empty_rows = 0
+        while len(self.buffer) < target:
+            row = self._next_row()
+            text = self._text_from_row(row)
+            if not text:
+                empty_rows += 1
+                self.empty_rows_seen += 1
+                if empty_rows >= self.max_empty_rows:
                     break
-
-    def close(self) -> None:
-        if hasattr(self, "_stop_event"):
-            self._stop_event.set()
-
-    def __del__(self) -> None:
-        self.close()
+                continue
+            empty_rows = 0
+            ids = self.tokenizer.encode(
+                text,
+                add_special_tokens=False,
+                truncation=True,
+                max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
+            )
+            if ids:
+                ids = [int(x) for x in ids]
+                self.buffer.extend(ids)
+                self._append_to_cache(ids)
+                self.info.samples_seen += 1
+        self._sync_info_counters()
 
     def prewarm(self, min_batches: Optional[int] = None) -> Dict[str, Any]:
         before = time.perf_counter()
         batches = int(min_batches or self.prefetch_batches)
         batches = max(1, min(64, batches))
         target_tokens = (self.sequence_length + 1) * self.batch_size * batches
-        while len(self.buffer) < target_tokens:
-            self._extend_buffer()
-            if len(self.buffer) >= target_tokens:
-                break
+        if target_tokens > getattr(self, "_target_buffer", 0):
+            self._target_buffer = target_tokens
+        self._extend_buffer()
         elapsed = time.perf_counter() - before
         self._sync_info_counters()
         return {
@@ -587,8 +506,12 @@ class RealDatasetBatcher:
         }
 
     def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        self._extend_buffer()
+        refill_watermark = getattr(self, "_refill_watermark", (self.sequence_length + 1) * self.batch_size * 4)
+        if len(self.buffer) < refill_watermark:
+            self._extend_buffer()
         total = self.batch_size * (self.sequence_length + 1)
+        if len(self.buffer) < total:
+            self._extend_buffer()
         if len(self.buffer) < total:
             raise RuntimeError(f"Dataset buffer underfilled: have {len(self.buffer)} tokens, need {total}")
         chunk = self.buffer[:total]

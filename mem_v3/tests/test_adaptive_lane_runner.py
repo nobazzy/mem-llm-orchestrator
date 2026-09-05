@@ -32,8 +32,8 @@ def test_get_lanes_for_model_configurations():
 
     lanes_130m = get_lanes_for_model("large_130m")
     assert "aggressive_seq256_zero0_gacc4" in lanes_130m
-    assert lanes_130m["aggressive_seq256_zero0_gacc4"].batch_size == 24
-    assert lanes_130m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 18000.0
+    assert lanes_130m["aggressive_seq256_zero0_gacc4"].batch_size == 12
+    assert lanes_130m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 12000.0
 
     lanes_250m = get_lanes_for_model("xlarge_250m")
     assert "aggressive_seq256_zero0_gacc4" in lanes_250m
