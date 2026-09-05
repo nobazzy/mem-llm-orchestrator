@@ -67,31 +67,31 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
         return {
             "aggressive_seq256_zero0_gacc4": LaneConfig(
                 name="aggressive_seq256_zero0_gacc4",
-                batch_size=12,
+                batch_size=24,
                 sequence_length=256,
                 gradient_accumulation_steps=4,
-                min_tokens_floor=14000.0,
-                expected_peak_tokens=28000.0,
+                min_tokens_floor=18000.0,
+                expected_peak_tokens=45000.0,
                 precision="fp16",
-                notes="Primary 130M sweet spot lane",
+                notes="Primary 130M high-throughput large-batch lane",
             ),
             "fast_seq256_zero0_gacc4": LaneConfig(
                 name="fast_seq256_zero0_gacc4",
-                batch_size=8,
+                batch_size=16,
                 sequence_length=256,
                 gradient_accumulation_steps=4,
-                min_tokens_floor=10000.0,
-                expected_peak_tokens=20000.0,
+                min_tokens_floor=12000.0,
+                expected_peak_tokens=32000.0,
                 precision="fp16",
                 notes="Fast fallback 130M lane",
             ),
             "safe_seq256": LaneConfig(
                 name="safe_seq256",
-                batch_size=6,
+                batch_size=8,
                 sequence_length=256,
                 gradient_accumulation_steps=2,
                 min_tokens_floor=6000.0,
-                expected_peak_tokens=14000.0,
+                expected_peak_tokens=18000.0,
                 precision="fp16",
                 notes="Conservative recovery 130M lane",
             ),
@@ -215,9 +215,7 @@ class AdaptiveLaneRunner:
             "gpu": gpu_info,
         }
         try:
-            tmp = self.controller_status_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(status, indent=2, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.controller_status_file)
+            self.controller_status_file.write_text(json.dumps(status, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
 
@@ -334,6 +332,7 @@ class AdaptiveLaneRunner:
         optimizer_durations: List[float] = []
         step_durations: List[float] = []
         bad_windows = 0
+        stable_windows = 0
 
         for step in range(1, total_steps + 1):
             t_step_start = time.perf_counter()
@@ -407,9 +406,7 @@ class AdaptiveLaneRunner:
                     "timestamp": time.time(),
                 }
                 try:
-                    tmp = self.progress_file.with_suffix(".tmp")
-                    tmp.write_text(json.dumps(prog_payload, indent=2), encoding="utf-8")
-                    tmp.replace(self.progress_file)
+                    self.progress_file.write_text(json.dumps(prog_payload, indent=2), encoding="utf-8")
 
                     milestone_entry = {
                         "step": step,
