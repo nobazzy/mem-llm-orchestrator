@@ -20,16 +20,15 @@ if _root not in sys.path:
 
 from core.orchestrator import OrchestratorContext
 from domain.models import CONFIRMATION_TOKEN, RuntimeRequest
+from runtime.adaptive_lane_runner import AdaptiveLaneRunner, STANDARD_LANES
 from runtime.checkpoint_manager import CheckpointManager
-from runtime.torch_native_runner import PyTorchNativeRunner
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MEM Live Training Execution")
+    parser = argparse.ArgumentParser(description="MEM Live Training Execution with Autonomous Lane Control")
     parser.add_argument("--steps", type=int, default=1000000)
     parser.add_argument("--target-steps", type=int, default=1000000)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--sequence-length", type=int, default=64)
+    parser.add_argument("--start-lane", default="aggressive_seq256_zero0_gacc4")
     parser.add_argument("--dataset-name", default="DKYoon/SlimPajama-6B")
     parser.add_argument("--dataset-fallback-name", default="roneneldan/TinyStories")
     parser.add_argument("--model-preset", default="medium_75m")
@@ -42,19 +41,18 @@ def main() -> None:
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     print("============================================================")
-    print("  MEM ORCHESTRATOR — INICIANDO TREINO REAL NA GPU")
-    print(f"  Dispositivo: {device_name} (Precisão: {effective_precision.upper()})")
-    print(f"  Target: {args.target_steps:,} steps | Executando lote: {args.steps:,} steps")
+    print("  MEM ORCHESTRATOR — TREINO REAL COM AUTONOMOUS LANE SWITCHING")
+    print(f"  Dispositivo: {device_name} (Aceleração AMP: {effective_precision.upper()})")
+    print(f"  Target: {args.target_steps:,} steps | Start Lane: {args.start_lane}")
     print(f"  Dataset: {args.dataset_name} (Streaming) [Fallback: {args.dataset_fallback_name}]")
-    print(f"  Modelo: {args.model_preset} (~72M parâmetros)")
+    print(f"  Modelo: {args.model_preset} (~72M parâmetros — SDPA Flash Attention)")
     print(f"  OpenAI API Key: {'PRESENTE (' + api_key[:10] + '...)' if api_key else 'AUSENTE'}")
     print("============================================================\n")
 
-    # Initialize context and AI planner
     context = OrchestratorContext(_root)
     req = RuntimeRequest(
         max_steps=args.target_steps,
-        batch_size=args.batch_size,
+        batch_size=16,
         zero_stage=0,
         precision=effective_precision,
         persistent_checkpoint=True,
@@ -64,7 +62,7 @@ def main() -> None:
         real_dataset=True,
         dataset_name=args.dataset_name,
         dataset_fallback_name=args.dataset_fallback_name,
-        sequence_length=args.sequence_length,
+        sequence_length=256,
         model_preset=args.model_preset,
         benchmark_mode="mem_native_pytorch",
         llm_enabled=bool(api_key),
@@ -81,65 +79,39 @@ def main() -> None:
     decision = context.policy.evaluate(req, plan, env_report, directive)
     print(f"  -> Decisão da Política: Allowed={decision.allowed} | Lane: {decision.lane}")
 
-    # Evidence directory for dashboard telemetry
     ts = time.strftime("%Y%m%d_%H%M%S")
     evidence_dir = Path(_root) / "evidence" / f"v89_wsl_deepspeed_{ts}"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = Path(_root) / "reports"
     reports_dir.mkdir(exist_ok=True)
 
-    # Save API telemetry and controller state
     api_telemetry = context.llm.telemetry_summary()
     (evidence_dir / "api_usage_summary.json").write_text(json.dumps(api_telemetry, indent=2), encoding="utf-8")
     (reports_dir / "api_usage_summary_latest.json").write_text(json.dumps(api_telemetry, indent=2), encoding="utf-8")
 
-    controller_status = {
-        "timestamp": time.time(),
-        "lane": decision.lane,
-        "allowed": decision.allowed,
-        "plan_source": plan.source,
-        "rationale": plan.rationale,
-        "executive_action": getattr(directive, "action", "stabilize") if directive else "default",
-        "target_steps": args.target_steps,
-        "steps_in_run": args.steps,
-    }
-    (Path(_root) / "evidence" / "v89_controller_status_latest.json").write_text(json.dumps(controller_status, indent=2), encoding="utf-8")
-
-    print("[3/3] Iniciando loop de treinamento Causal LM com telemetria ao vivo...")
+    print("[3/3] Iniciando AdaptiveLaneRunner com troca autônoma de lanes...")
     ckpt_mgr = CheckpointManager(root=Path(_root) / "checkpoints")
-    runner = PyTorchNativeRunner(checkpoint_manager=ckpt_mgr)
+    runner = AdaptiveLaneRunner(
+        checkpoint_manager=ckpt_mgr,
+        evidence_dir=evidence_dir,
+        initial_lane=args.start_lane,
+    )
 
-    metrics, checkpoint = runner.run(
-        steps=args.steps,
-        batch_size=args.batch_size,
-        zero_stage=0,
-        precision=effective_precision,
-        persistent_checkpoint=True,
-        applied_hyperparams={"batch_size": args.batch_size, "precision": effective_precision, "gradient_accumulation_steps": 1},
-        executive_directives=decision.executive_runtime_directives,
-        dataset_settings={
-            "real_dataset": True,
-            "dataset_name": args.dataset_name,
-            "dataset_fallback_name": args.dataset_fallback_name,
-            "dataset_split": "train",
-            "dataset_streaming": True,
-            "tokenizer_name": "gpt2",
-            "sequence_length": args.sequence_length,
-            "model_preset": args.model_preset,
-            "evidence_dir": str(evidence_dir),
-            "target_steps": args.target_steps,
-            "progress_heartbeat_interval": 5,
-            "checkpoint_interval": 500,
-        },
+    result = runner.train_loop(
+        total_steps=args.steps,
+        dataset_name=args.dataset_name,
+        fallback_name=args.dataset_fallback_name,
+        model_preset=args.model_preset,
+        checkpoint_interval=500,
+        eval_window_steps=40,
     )
 
     print("\n============================================================")
     print("  TREINO CONCLUÍDO COM SUCESSO!")
-    print(f"  Steps completados: {metrics.get('micro_train_steps_completed')}")
-    print(f"  Tokens processados: {metrics.get('tokens_processed')}")
-    print(f"  Loss inicial: {metrics.get('loss_first')} -> Loss final: {metrics.get('loss_last')}")
-    print(f"  Throughput: {metrics.get('tokens_per_second')} tokens/s | {metrics.get('steps_per_second')} steps/s")
-    print(f"  Checkpoint gravado: {checkpoint.get('checkpoint_written')} | Path: {checkpoint.get('checkpoint_path')}")
+    print(f"  Steps completados: {result.get('steps_completed')}")
+    print(f"  Tokens processados: {result.get('tokens_processed')}")
+    print(f"  Loss inicial: {result.get('loss_first')} -> Loss final: {result.get('loss_last')}")
+    print(f"  Histórico de lanes: {len(result.get('lane_history', []))} eventos registrados")
     print("============================================================\n")
 
 
