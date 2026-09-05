@@ -284,7 +284,7 @@ class AdaptiveLaneRunner:
         fallback_name: str = "roneneldan/TinyStories",
         model_preset: str = "medium_75m",
         checkpoint_interval: int = 500,
-        eval_window_steps: int = 40,
+        eval_window_steps: int = 20,
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         use_amp = (device.type == "cuda")

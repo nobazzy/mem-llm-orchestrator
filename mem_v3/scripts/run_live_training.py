@@ -113,7 +113,7 @@ def main() -> None:
         fallback_name=args.dataset_fallback_name,
         model_preset=args.model_preset,
         checkpoint_interval=500,
-        eval_window_steps=40,
+        eval_window_steps=20,
     )
 
     print("\n============================================================")

@@ -485,6 +485,7 @@ class RealDatasetBatcher:
         if len(self.buffer) < target_tokens:
             self._extend_from_cache(target_tokens - len(self.buffer))
 
+        min_needed = (self.sequence_length + 1) * self.batch_size
         while len(self.buffer) < target_tokens:
             try:
                 ids = self._queue.get_nowait()
@@ -493,36 +494,19 @@ class RealDatasetBatcher:
                 self.info.samples_seen += 1
                 self._sync_info_counters()
             except queue.Empty:
-                min_needed = (self.sequence_length + 1) * self.batch_size
                 if len(self.buffer) >= min_needed:
                     break
                 try:
-                    ids = self._queue.get(timeout=0.2)
+                    ids = self._queue.get(timeout=2.0)
                     self.buffer.extend(ids)
                     self._append_to_cache(ids)
                     self.info.samples_seen += 1
                     self._sync_info_counters()
                 except queue.Empty:
-                    try:
-                        row = self._next_row()
-                        text = self._text_from_row(row)
-                        if text:
-                            ids = self.tokenizer.encode(
-                                text,
-                                add_special_tokens=False,
-                                truncation=True,
-                                max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
-                            )
-                            if ids:
-                                ids = [int(x) for x in ids]
-                                self.buffer.extend(ids)
-                                self._append_to_cache(ids)
-                                self.info.samples_seen += 1
-                                self._sync_info_counters()
-                    except Exception as exc:
-                        if not self.info.fallback_used and self.fallback_name:
-                            self._switch_to_fallback(f"Direct buffer extend error: {exc}")
-                        time.sleep(0.05)
+                    if not self.info.fallback_used and self.fallback_name:
+                        self._switch_to_fallback("Streaming queue wait timeout")
+                    time.sleep(0.01)
+                    break
 
     def close(self) -> None:
         if hasattr(self, "_stop_event"):
