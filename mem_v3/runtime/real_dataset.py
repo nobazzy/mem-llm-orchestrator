@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, Iterator, List, Tuple, Optional, Callabl
 import json
 import os
 import time
+import queue
+import threading
 import hashlib
 from pathlib import Path
 import torch
@@ -253,6 +255,11 @@ class RealDatasetBatcher:
             dataset_source=dataset_source,
         )
 
+        self._queue: queue.Queue[List[int]] = queue.Queue(maxsize=150)
+        self._stop_event = threading.Event()
+        self._worker_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
+        self._worker_thread.start()
+
     @staticmethod
     def _parse_mix(spec: str) -> List[Tuple[str, str]]:
         out: List[Tuple[str, str]] = []
@@ -444,38 +451,82 @@ class RealDatasetBatcher:
         self.info.dataset_exhaustions = self.dataset_exhaustions
         self.info.empty_rows_seen = self.empty_rows_seen
 
+    def _prefetch_worker(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                row = self._next_row()
+                text = self._text_from_row(row)
+                if not text:
+                    continue
+                ids = self.tokenizer.encode(
+                    text,
+                    add_special_tokens=False,
+                    truncation=True,
+                    max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
+                )
+                if ids:
+                    ids = [int(x) for x in ids]
+                    while not self._stop_event.is_set():
+                        try:
+                            self._queue.put(ids, timeout=0.2)
+                            break
+                        except queue.Full:
+                            continue
+            except Exception as exc:
+                if not self.info.fallback_used and self.fallback_name:
+                    self._switch_to_fallback(f"Prefetch worker error: {type(exc).__name__}: {exc}")
+                time.sleep(0.1)
+
     def _extend_buffer(self) -> None:
         target_tokens = (self.sequence_length + 1) * self.batch_size * self.prefetch_batches
         if len(self.buffer) < target_tokens:
             self._extend_from_cache(target_tokens - len(self.buffer))
 
-        empty_rows = 0
         while len(self.buffer) < target_tokens:
-            row = self._next_row()
-            text = self._text_from_row(row)
-            if not text:
-                empty_rows += 1
-                self.empty_rows_seen += 1
-                self._sync_info_counters()
-                if empty_rows >= self.max_empty_rows:
-                    raise RuntimeError(
-                        f"Dataset produced {empty_rows} consecutive rows without valid text. "
-                        f"Check MEM_DATASET_TEXT_FIELD={self.text_field!r}."
-                    )
-                continue
-            empty_rows = 0
-            ids = self.tokenizer.encode(
-                text,
-                add_special_tokens=False,
-                truncation=True,
-                max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
-            )
-            if ids:
-                ids = [int(x) for x in ids]
+            try:
+                ids = self._queue.get_nowait()
                 self.buffer.extend(ids)
                 self._append_to_cache(ids)
                 self.info.samples_seen += 1
                 self._sync_info_counters()
+            except queue.Empty:
+                min_needed = (self.sequence_length + 1) * self.batch_size
+                if len(self.buffer) >= min_needed:
+                    break
+                try:
+                    ids = self._queue.get(timeout=0.2)
+                    self.buffer.extend(ids)
+                    self._append_to_cache(ids)
+                    self.info.samples_seen += 1
+                    self._sync_info_counters()
+                except queue.Empty:
+                    try:
+                        row = self._next_row()
+                        text = self._text_from_row(row)
+                        if text:
+                            ids = self.tokenizer.encode(
+                                text,
+                                add_special_tokens=False,
+                                truncation=True,
+                                max_length=max(self.sequence_length + 1, min(2048, self.sequence_length * 12)),
+                            )
+                            if ids:
+                                ids = [int(x) for x in ids]
+                                self.buffer.extend(ids)
+                                self._append_to_cache(ids)
+                                self.info.samples_seen += 1
+                                self._sync_info_counters()
+                    except Exception as exc:
+                        if not self.info.fallback_used and self.fallback_name:
+                            self._switch_to_fallback(f"Direct buffer extend error: {exc}")
+                        time.sleep(0.05)
+
+    def close(self) -> None:
+        if hasattr(self, "_stop_event"):
+            self._stop_event.set()
+
+    def __del__(self) -> None:
+        self.close()
 
     def prewarm(self, min_batches: Optional[int] = None) -> Dict[str, Any]:
         before = time.perf_counter()
