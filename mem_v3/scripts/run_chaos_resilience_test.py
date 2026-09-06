@@ -117,7 +117,7 @@ class ChaosInjector:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="MEM Chaos & Adverse Environment Resilience Stress Test")
-    parser.add_argument("--steps", type=int, default=10000, help="Total training steps for the stress test")
+    parser.add_argument("--steps", type=int, default=100000, help="Total training steps for the stress test (default: 100,000)")
     parser.add_argument("--model-preset", default="xlarge_250m", help="Model preset: xlarge_250m, large_130m, medium_75m")
     parser.add_argument("--dataset-name", default="roneneldan/TinyStories", help="Dataset name on Hugging Face")
     parser.add_argument("--precision", default="fp16", help="Precision: fp16 or bf16")
@@ -126,6 +126,7 @@ def main() -> None:
     parser.add_argument("--shock-duration-sec", type=float, default=20.0, help="Duration of each VRAM shock in seconds")
     parser.add_argument("--enable-vram-chaos", action="store_true", default=True, help="Enable VRAM shockwaves")
     parser.add_argument("--enable-adversarial-chaos", action="store_true", default=True, help="Enable adversarial directives")
+    parser.add_argument("--resume-latest", action="store_true", help="Resume from latest checkpoint if available")
     args = parser.parse_args()
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -228,6 +229,7 @@ def main() -> None:
         model_preset=args.model_preset,
         checkpoint_interval=500,
         eval_window_steps=50,
+        resume_from_checkpoint="latest" if args.resume_latest else None,
     )
     chaos.stop_event.set()
     total_elapsed = time.perf_counter() - start_time
