@@ -18,13 +18,12 @@ _root = Path(__file__).resolve().parent.parent
 
 
 def get_latest_evidence_dir() -> Path | None:
-    dirs = sorted(_root.glob("evidence/v89_wsl_deepspeed_*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    dirs = [
+        d for d in (_root / "evidence").iterdir()
+        if d.is_dir() and not d.name.startswith("archive_")
+    ]
     if dirs:
-        return dirs[0]
-    dirs = sorted(_root.glob("evidence/*"), key=lambda p: p.stat().st_mtime if p.is_dir() else 0, reverse=True)
-    for d in dirs:
-        if d.is_dir():
-            return d
+        return sorted(dirs, key=lambda p: p.stat().st_mtime, reverse=True)[0]
     return None
 
 
