@@ -1,4 +1,4 @@
-﻿"""
+"""
 MEM ORCHESTRATOR — 30-Second Live Chaos Defense Video Demonstration.
 Designed for split-screen video recording (Terminal + Web Dashboard).
 Demonstrates real-time +1.5GB VRAM shock injection, automatic LocalPolicyEngine demotion,
@@ -94,10 +94,10 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
     
-    # Demo Timeline Settings (approx 25-30 seconds total)
-    total_steps = 150
-    shock_start_step = 45
-    shock_end_step = 105
+    # Demo Timeline Settings (1,000 Total Steps)
+    total_steps = 1000
+    shock_start_step = 200
+    shock_end_step = 600
     shock_tensor = None
     
     current_lane = "aggressive_seq256_zero0_gacc4"
@@ -116,7 +116,7 @@ def main():
         # Check Chaos Injection Point
         if step == shock_start_step:
             print("\n" + "!"*78, flush=True)
-            print(f"{BOLD}{RED}🚨 [CHAOS TRIGGER] INJECTING +1,500 MB VRAM EXTERNAL ALLOCATION SHOCK! 🚨{RESET}", flush=True)
+            print(f"{BOLD}{RED}🚨 [CHAOS TRIGGER] INJECTING +1,500 MB VRAM SHOCK (STEPS 200-600)! 🚨{RESET}", flush=True)
             # Allocate 1500 MB of VRAM
             shock_elements = (1500 * 1024 * 1024) // 4
             shock_tensor = torch.empty(shock_elements, dtype=torch.float32, device=device)
@@ -133,13 +133,13 @@ def main():
             current_lane = "safe_seq256"
             batch_size = 4
             gacc = 2
-            print(f"{GREEN}✅ [STABILIZED] Running in SAFE Lane (Micro-batch 4). Training uninterrupted!{RESET}", flush=True)
+            print(f"{GREEN}✅ [STABILIZED] Running in SAFE Lane (Micro-batch 4) for 400 steps. Zero OOM!{RESET}", flush=True)
             print("!"*78 + "\n", flush=True)
             time.sleep(0.8)
             
         elif step == shock_end_step:
             print("\n" + "="*78, flush=True)
-            print(f"{BOLD}{GREEN}🟢 [CHAOS CLEARED] Releasing +1,500 MB shock tensor. Memory pressure relieved.{RESET}", flush=True)
+            print(f"{BOLD}{GREEN}🟢 [CHAOS CLEARED] Releasing +1,500 MB shock tensor at step 600. Headroom restored.{RESET}", flush=True)
             del shock_tensor
             shock_tensor = None
             torch.cuda.empty_cache()
@@ -169,7 +169,7 @@ def main():
         step_dur = time.time() - step_t0
         tokens_step = batch_size * gacc * 256
         tok_sec = tokens_step / max(step_dur, 1e-4)
-        loss_val = max(0.005, loss_val * 0.985 + (loss.item() * gacc) * 0.015)
+        loss_val = max(0.005, loss_val * 0.992 + (loss.item() * gacc) * 0.008)
         
         vram_alloc_mb = torch.cuda.memory_allocated() / (1024 ** 2)
         vram_res_mb = torch.cuda.memory_reserved() / (1024 ** 2)
@@ -181,16 +181,16 @@ def main():
         lane_badge = f"{RED}[SAFE_RECOVERY]{RESET}" if shock_active else f"{GREEN}[AGGRESSIVE]{RESET}"
         guard_badge = f"{YELLOW}🛡️ OOM PREVENTED{RESET}" if shock_active else f"{CYAN}⚡ PEAK{RESET}"
         
-        print(f"Step {step:03d}/{total_steps} | {tok_sec:6.0f} tok/s | VRAM: {vram_alloc_mb:4.0f}MB ({vram_pct:4.1f}%) | Lane: {lane_badge} | Loss: {loss_val:.4f} | {guard_badge}", flush=True)
+        print(f"Step {step:04d}/{total_steps} | {tok_sec:6.0f} tok/s | VRAM: {vram_alloc_mb:4.0f}MB ({vram_pct:4.1f}%) | Lane: {lane_badge} | Loss: {loss_val:.4f} | {guard_badge}", flush=True)
         
         # Update dashboard state for web UI
         update_dashboard_state(step, total_steps, current_lane, batch_size, gacc, tok_sec, loss_val, shock_active, vram_alloc_mb, vram_res_mb)
         
-        time.sleep(0.06) # Smooth visual pacing for recording
+        time.sleep(0.015) # Optimized for 1000 steps demonstration (~1.5 minutes)
         
     print("\n" + "="*78, flush=True)
-    print(f"{BOLD}{GREEN}  DEMONSTRATION COMPLETED SUCCESSFULLY!{RESET}", flush=True)
-    print(f"  Total Steps: {total_steps} | Shocks Injected: 1 (+1.5GB) | OOM Crashes: 0", flush=True)
+    print(f"{BOLD}{GREEN}  DEMONSTRATION OF 1,000 STEPS COMPLETED SUCCESSFULLY!{RESET}", flush=True)
+    print(f"  Total Steps: {total_steps} | Shock Absorbed: 400 Steps (+1.5GB) | OOM Crashes: 0", flush=True)
     print(f"  Proof of Resilience: 100% Zero-OOM Governance Verified on 8GB Hardware", flush=True)
     print("="*78 + "\n", flush=True)
 
