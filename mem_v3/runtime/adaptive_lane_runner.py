@@ -282,17 +282,23 @@ class AdaptiveLaneRunner:
         # Promotion logic (requires 5 consecutive stable windows above threshold and healthy VRAM)
         if stable_windows >= 5 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5500.0:
             if current.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
-                if window_tokens_sec >= 18000.0:
+                target_lane = self.lanes["fast_seq256_zero0_gacc4"]
+                promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.70)
+                if window_tokens_sec >= promote_thresh:
                     self.last_switch_step = step
-                    return self.lanes["fast_seq256_zero0_gacc4"], f"Promoting to fast lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
+                    return target_lane, f"Promoting to fast lane: sustained throughput {window_tokens_sec:.0f} tok/s >= {promote_thresh:.0f}", 0, 0
             elif current.name == "fast_seq256_zero0_gacc4" and "aggressive_seq256_zero0_gacc4" in self.lanes:
-                if window_tokens_sec >= 24000.0:
+                target_lane = self.lanes["aggressive_seq256_zero0_gacc4"]
+                promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.70)
+                if window_tokens_sec >= promote_thresh:
                     self.last_switch_step = step
-                    return self.lanes["aggressive_seq256_zero0_gacc4"], f"Promoting to aggressive lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
+                    return target_lane, f"Promoting to aggressive lane: sustained throughput {window_tokens_sec:.0f} tok/s >= {promote_thresh:.0f}", 0, 0
             elif current.name == "aggressive_seq256_zero0_gacc4" and "ultra_peak_seq256" in self.lanes:
-                if window_tokens_sec >= 32000.0:
+                target_lane = self.lanes["ultra_peak_seq256"]
+                promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.75)
+                if window_tokens_sec >= promote_thresh:
                     self.last_switch_step = step
-                    return self.lanes["ultra_peak_seq256"], f"Promoting to ultra-peak lane: sustained throughput {window_tokens_sec:.0f} tok/s on 8GB GPU", 0, 0
+                    return target_lane, f"Promoting to ultra-peak lane: sustained throughput {window_tokens_sec:.0f} tok/s >= {promote_thresh:.0f}", 0, 0
 
         return None, "keep_current_lane", bad_windows, stable_windows
 
