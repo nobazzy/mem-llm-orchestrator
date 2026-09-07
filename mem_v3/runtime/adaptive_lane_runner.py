@@ -33,21 +33,21 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
         return {
             "aggressive_seq256_zero0_gacc4": LaneConfig(
                 name="aggressive_seq256_zero0_gacc4",
-                batch_size=8,
+                batch_size=6,
                 sequence_length=256,
-                gradient_accumulation_steps=4,
-                min_tokens_floor=6000.0,
-                expected_peak_tokens=22000.0,
+                gradient_accumulation_steps=2,
+                min_tokens_floor=5500.0,
+                expected_peak_tokens=14000.0,
                 precision="fp16",
                 notes="Primary 250M high-capacity lane",
             ),
             "fast_seq256_zero0_gacc4": LaneConfig(
                 name="fast_seq256_zero0_gacc4",
-                batch_size=6,
+                batch_size=5,
                 sequence_length=256,
-                gradient_accumulation_steps=4,
+                gradient_accumulation_steps=2,
                 min_tokens_floor=4500.0,
-                expected_peak_tokens=16000.0,
+                expected_peak_tokens=12000.0,
                 precision="fp16",
                 notes="Fast fallback 250M lane",
             ),
@@ -167,7 +167,7 @@ class AdaptiveLaneRunner:
         self.controller_status_file = self.evidence_dir.parent / "v89_controller_status_latest.json"
         self.lane_history: List[Dict[str, Any]] = []
         self.last_switch_step = 0
-        self.min_switch_cooldown_steps = 300
+        self.min_switch_cooldown_steps = 100
 
     def _log_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         entry = {
@@ -240,18 +240,20 @@ class AdaptiveLaneRunner:
         bad_windows: int,
         stable_windows: int = 0,
     ) -> Tuple[Optional[LaneConfig], str, int, int]:
-        """Evaluates whether to switch lane (Promotion or Demotion) with anti-flapping hysteresis."""
+        """Evaluates whether to switch lane (Promotion or Demotion) with dynamic adaptive response."""
         current = self.current_lane
 
         # Check VRAM headroom for 8GB GPU
         vram_alloc_mb = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
-        if vram_alloc_mb > 6500.0 and current.name != "safe_seq256" and "safe_seq256" in self.lanes:
+        if vram_alloc_mb > 5800.0 and current.name != "safe_seq256" and "safe_seq256" in self.lanes:
             self.last_switch_step = step
-            return self.lanes["safe_seq256"], f"Emergency VRAM Demotion: {vram_alloc_mb:.0f} MB > 6500 MB ceiling (Zero-OOM Guard)", 0, 0
+            return self.lanes["safe_seq256"], f"Emergency VRAM Demotion: {vram_alloc_mb:.0f} MB > 5800 MB ceiling (Zero-OOM Guard)", 0, 0
 
-        # Cooldown guard: prevent flapping within cooldown window
-        if (step - self.last_switch_step) < self.min_switch_cooldown_steps:
-            return None, "cooldown_active", 0, 0
+        # Cooldown guard: prevent rapid flapping, but allow emergency demotion if throughput is severely collapsed (< 50% floor)
+        is_severe_drop = (window_tokens_sec < current.min_tokens_floor * 0.50)
+        cooldown_steps = 100 if is_severe_drop else self.min_switch_cooldown_steps
+        if (step - self.last_switch_step) < cooldown_steps and not is_severe_drop:
+            return None, "cooldown_active", bad_windows, stable_windows
 
         reasons = []
         if window_tokens_sec < current.min_tokens_floor:
@@ -261,11 +263,11 @@ class AdaptiveLaneRunner:
         if data_wait_ratio > 0.35:
             reasons.append("data_wait_severe")
 
-        # Demotion logic (requires 5 consecutive bad windows)
+        # Demotion logic (requires 2 consecutive bad windows or 1 severe window)
         if "below_lane_min_tokens" in reasons:
-            bad_windows += 1
+            bad_windows += 2 if is_severe_drop else 1
             stable_windows = 0
-            if bad_windows >= 5:
+            if bad_windows >= 2:
                 if current.name == "ultra_peak_seq256" and "aggressive_seq256_zero0_gacc4" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["aggressive_seq256_zero0_gacc4"], f"Demoting to aggressive: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
@@ -275,12 +277,15 @@ class AdaptiveLaneRunner:
                 elif current.name == "fast_seq256_zero0_gacc4" and "safe_seq256" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["safe_seq256"], f"Demoting to safe recovery: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
+                elif current.name != "safe_seq256" and "safe_seq256" in self.lanes:
+                    self.last_switch_step = step
+                    return self.lanes["safe_seq256"], f"Emergency recovery to safe lane: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
         else:
             bad_windows = max(0, bad_windows - 1)
             stable_windows += 1
 
-        # Promotion logic (requires 5 consecutive stable windows above threshold and healthy VRAM)
-        if stable_windows >= 5 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5500.0:
+        # Promotion logic (requires 3 consecutive stable windows above threshold and healthy VRAM)
+        if stable_windows >= 3 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5200.0:
             if current.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
                 target_lane = self.lanes["fast_seq256_zero0_gacc4"]
                 promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.70)
