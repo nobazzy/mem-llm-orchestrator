@@ -313,6 +313,7 @@ class AdaptiveLaneRunner:
         checkpoint_interval: int = 500,
         eval_window_steps: int = 50,
         resume_from_checkpoint: Optional[str | Path | bool] = None,
+        step_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
@@ -499,6 +500,19 @@ class AdaptiveLaneRunner:
                     efficiency_score=efficiency_score,
                 )
 
+                if step_callback is not None:
+                    try:
+                        step_callback(step, loss_val, win_tok_sec, self)
+                    except Exception:
+                        pass
+
+                # Continuous VRAM defragmentation guard against Windows WDDM caching allocator hoarding
+                if torch.cuda.is_available():
+                    _v_res = torch.cuda.memory_reserved() / (1024 ** 2)
+                    _v_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
+                    if _v_res > 5500.0 or (_v_res - _v_alloc) > 800.0:
+                        torch.cuda.empty_cache()
+
                 if step >= (initial_step + eval_window_steps):
                     # Check for live dynamic control directive
                     new_lane = None
@@ -512,9 +526,24 @@ class AdaptiveLaneRunner:
                             directive_file.unlink(missing_ok=True)
                             action = dir_data.get("action", "")
                             target_lane = dir_data.get("target_lane", "")
-                            if action == "force_lane" and target_lane in self.lanes:
-                                new_lane = self.lanes[target_lane]
-                                trans_reason = f"External directive: forced switch to {target_lane}"
+                            vram_alloc = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
+
+                            if action == "force_lane":
+                                if target_lane not in self.lanes:
+                                    self._log_event("directive_rejected", {
+                                        "action": action,
+                                        "target_lane": target_lane,
+                                        "reason": f"Target lane '{target_lane}' is invalid for preset '{model_preset}'",
+                                    })
+                                elif vram_alloc > 5500.0 and target_lane != "safe_seq256":
+                                    self._log_event("directive_rejected", {
+                                        "action": action,
+                                        "target_lane": target_lane,
+                                        "reason": f"Rejected by LocalPolicyEngine: High VRAM pressure ({vram_alloc:.0f} MB > 5500 MB ceiling)",
+                                    })
+                                else:
+                                    new_lane = self.lanes[target_lane]
+                                    trans_reason = f"External directive validated: forced switch to {target_lane}"
                             elif action == "promote":
                                 if self.current_lane.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
                                     new_lane = self.lanes["fast_seq256_zero0_gacc4"]

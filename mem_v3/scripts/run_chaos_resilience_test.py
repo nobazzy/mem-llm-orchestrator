@@ -35,26 +35,28 @@ from runtime.checkpoint_manager import CheckpointManager
 
 
 class ChaosInjector:
-    """Simulates adverse runtime conditions (VRAM shocks, I/O latency, adversarial directives)."""
+    """Simulates adverse runtime conditions (VRAM shocks, I/O latency, adversarial directives) synchronously."""
 
     def __init__(
         self,
         evidence_dir: Path,
         enable_vram_shock: bool = True,
-        vram_shock_size_mb: int = 1800,
-        shock_interval_steps: int = 400,
-        shock_duration_sec: float = 18.0,
+        vram_shock_size_mb: int = 1200,
+        shock_interval_steps: int = 500,
+        shock_duration_steps: int = 100,
         enable_adversarial_directives: bool = True,
     ) -> None:
         self.evidence_dir = Path(evidence_dir)
         self.enable_vram_shock = enable_vram_shock
         self.vram_shock_size_mb = vram_shock_size_mb
         self.shock_interval_steps = shock_interval_steps
-        self.shock_duration_sec = shock_duration_sec
+        self.shock_duration_steps = shock_duration_steps
         self.enable_adversarial_directives = enable_adversarial_directives
-        self.stop_event = threading.Event()
         self.chaos_events: List[Dict[str, Any]] = []
         self._shock_tensor: Optional[torch.Tensor] = None
+        self._shock_active_until_step = 0
+        self._last_shock_step = 0
+        self._shock_count = 0
 
     def record_chaos_event(self, event_type: str, details: Dict[str, Any]) -> None:
         entry = {
@@ -70,49 +72,63 @@ class ChaosInjector:
         except Exception:
             pass
 
-    def trigger_vram_shock(self) -> None:
-        """Dynamically allocates a large GPU tensor to simulate external VRAM contention."""
-        if not torch.cuda.is_available():
-            return
-        try:
-            # Allocate ~vram_shock_size_mb in float32 (4 bytes per element)
-            num_elements = (self.vram_shock_size_mb * 1024 * 1024) // 4
-            print(f"\n[CHAOS INJECTOR] >>> INJETANDO CHOQUE DE VRAM: +{self.vram_shock_size_mb} MB no dispositivo CUDA...")
-            self._shock_tensor = torch.zeros((num_elements,), dtype=torch.float32, device="cuda:0")
-            self.record_chaos_event("vram_shock_injected", {
-                "size_mb": self.vram_shock_size_mb,
-                "duration_sec": self.shock_duration_sec,
-                "vram_allocated_now_mb": round(torch.cuda.memory_allocated() / (1024 ** 2), 1),
-            })
-            time.sleep(self.shock_duration_sec)
-        except Exception as e:
-            print(f"[CHAOS INJECTOR] Falha ao alocar choque de VRAM (ou GPU já saturada): {e}")
-        finally:
-            if self._shock_tensor is not None:
-                del self._shock_tensor
-                self._shock_tensor = None
+    def on_step(self, step: int, loss: float, tok_sec: float, runner: Any) -> None:
+        # 1. Release active VRAM shock when duration expires
+        if self._shock_tensor is not None and step >= self._shock_active_until_step:
+            del self._shock_tensor
+            self._shock_tensor = None
+            if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                print(f"[CHAOS INJECTOR] <<< CHOQUE DE VRAM ENCERRADO: {self.vram_shock_size_mb} MB liberados. Recuperando...\n")
-                self.record_chaos_event("vram_shock_cleared", {
-                    "size_mb": self.vram_shock_size_mb,
-                    "vram_allocated_now_mb": round(torch.cuda.memory_allocated() / (1024 ** 2), 1),
-                })
+            print(f"\n[CHAOS INJECTOR] <<< CHOQUE DE VRAM ENCERRADO no step {step}: +{self.vram_shock_size_mb} MB liberados. Recuperando...\n")
+            self.record_chaos_event("vram_shock_cleared", {
+                "step": step,
+                "size_mb": self.vram_shock_size_mb,
+                "vram_allocated_mb": round(torch.cuda.memory_allocated() / (1024 ** 2), 1) if torch.cuda.is_available() else 0.0,
+            })
 
-    def trigger_adversarial_directive(self) -> None:
-        """Injects an illegal or unsafe external directive to test LocalPolicyEngine gatekeeper."""
-        directive = {
-            "action": "force_lane",
-            "target_lane": "ultra_peak_seq256",
-            "reason": "Hostile/Adversarial Planner Injection (Attempting to force illegal peak lane under high memory)",
-            "timestamp": time.time(),
-        }
-        directive_path = self.evidence_dir / "control_directive.json"
-        try:
-            directive_path.write_text(json.dumps(directive, indent=2), encoding="utf-8")
-            print("\n[CHAOS INJECTOR] >>> DIRETIVA ADVERSARIAL INJETADA: Tentativa de forçar lane 'ultra_peak_seq256'...")
-            self.record_chaos_event("adversarial_directive_injected", directive)
-        except Exception:
-            pass
+        # 2. Trigger new chaos event at specified step intervals
+        if step > 0 and (step - self._last_shock_step) >= self.shock_interval_steps:
+            self._last_shock_step = step
+            self._shock_count += 1
+
+            if self._shock_count % 2 == 1 and self.enable_vram_shock:
+                # VRAM shock injection
+                if torch.cuda.is_available():
+                    try:
+                        num_elements = (self.vram_shock_size_mb * 1024 * 1024) // 4
+                        print(f"\n[CHAOS INJECTOR] >>> INJETANDO CHOQUE DE VRAM no step {step}: +{self.vram_shock_size_mb} MB por {self.shock_duration_steps} steps...")
+                        self._shock_tensor = torch.zeros((num_elements,), dtype=torch.float32, device="cuda:0")
+                        self._shock_active_until_step = step + self.shock_duration_steps
+                        self.record_chaos_event("vram_shock_injected", {
+                            "step": step,
+                            "size_mb": self.vram_shock_size_mb,
+                            "duration_steps": self.shock_duration_steps,
+                            "vram_allocated_mb": round(torch.cuda.memory_allocated() / (1024 ** 2), 1),
+                        })
+                    except Exception as e:
+                        print(f"[CHAOS INJECTOR] Falha ao alocar choque de VRAM (GPU saturada): {e}")
+                        if self._shock_tensor is not None:
+                            del self._shock_tensor
+                            self._shock_tensor = None
+                            torch.cuda.empty_cache()
+            elif self.enable_adversarial_directives:
+                # Adversarial directive injection
+                directive = {
+                    "action": "force_lane",
+                    "target_lane": "ultra_peak_seq256" if self._shock_count % 4 == 0 else "aggressive_seq256_zero0_gacc4",
+                    "reason": f"Adversarial Planner Injection at step {step}",
+                    "timestamp": time.time(),
+                }
+                directive_path = self.evidence_dir / "control_directive.json"
+                try:
+                    directive_path.write_text(json.dumps(directive, indent=2), encoding="utf-8")
+                    print(f"\n[CHAOS INJECTOR] >>> DIRETIVA ADVERSARIAL INJETADA no step {step}: Forçar lane '{directive['target_lane']}'...")
+                    self.record_chaos_event("adversarial_directive_injected", {
+                        "step": step,
+                        **directive,
+                    })
+                except Exception:
+                    pass
 
 
 def main() -> None:
@@ -121,15 +137,14 @@ def main() -> None:
     parser.add_argument("--model-preset", default="xlarge_250m", help="Model preset: xlarge_250m, large_130m, medium_75m")
     parser.add_argument("--dataset-name", default="roneneldan/TinyStories", help="Dataset name on Hugging Face")
     parser.add_argument("--precision", default="fp16", help="Precision: fp16 or bf16")
-    parser.add_argument("--vram-shock-mb", type=int, default=1800, help="VRAM shock injection size in MB")
-    parser.add_argument("--shock-interval-steps", type=int, default=600, help="Interval between chaos shocks in steps")
-    parser.add_argument("--shock-duration-sec", type=float, default=20.0, help="Duration of each VRAM shock in seconds")
+    parser.add_argument("--vram-shock-mb", type=int, default=1200, help="VRAM shock injection size in MB")
+    parser.add_argument("--shock-interval-steps", type=int, default=500, help="Interval between chaos shocks in steps")
+    parser.add_argument("--shock-duration-steps", type=int, default=100, help="Duration of each VRAM shock in steps")
     parser.add_argument("--enable-vram-chaos", action="store_true", default=True, help="Enable VRAM shockwaves")
     parser.add_argument("--enable-adversarial-chaos", action="store_true", default=True, help="Enable adversarial directives")
     parser.add_argument("--resume-latest", action="store_true", help="Resume from latest checkpoint if available")
     args = parser.parse_args()
 
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
 
     print("=" * 70)
@@ -138,7 +153,7 @@ def main() -> None:
     print(f"  Modelo: {args.model_preset} (~255M parâmetros — Teste no limite de VRAM)")
     print(f"  Dataset: {args.dataset_name} (Streaming)")
     print(f"  Total de Steps do Teste: {args.steps:,} steps")
-    print(f"  Choque de VRAM Externa: {args.vram_shock_mb} MB a cada {args.shock_interval_steps} steps ({args.shock_duration_sec}s duração)")
+    print(f"  Choque de VRAM Externa: {args.vram_shock_mb} MB a cada {args.shock_interval_steps} steps ({args.shock_duration_steps} steps duração)")
     print(f"  Diretivas Adversariais: {'ATIVAS' if args.enable_adversarial_chaos else 'DESATIVADAS'}")
     print("=" * 70 + "\n")
 
@@ -181,7 +196,7 @@ def main() -> None:
         enable_vram_shock=args.enable_vram_chaos,
         vram_shock_size_mb=args.vram_shock_mb,
         shock_interval_steps=args.shock_interval_steps,
-        shock_duration_sec=args.shock_duration_sec,
+        shock_duration_steps=args.shock_duration_steps,
         enable_adversarial_directives=args.enable_adversarial_chaos,
     )
 
@@ -195,32 +210,6 @@ def main() -> None:
 
     print("\n[3/4] Iniciando Treinamento com Injeção Dinâmica de Caos...")
 
-    # Thread to schedule chaos shocks at specific step intervals
-    def chaos_loop():
-        time.sleep(30.0) # Warmup period
-        shock_count = 0
-        while not chaos.stop_event.is_set():
-            ctrl_file = evidence_dir.parent / "v89_controller_status_latest.json"
-            current_step = 0
-            if ctrl_file.exists():
-                try:
-                    cdata = json.loads(ctrl_file.read_text(encoding="utf-8"))
-                    current_step = cdata.get("global_step", 0)
-                except Exception:
-                    pass
-
-            if current_step > 0 and (current_step % args.shock_interval_steps) < 50:
-                shock_count += 1
-                if shock_count % 2 == 1 and args.enable_vram_chaos:
-                    chaos.trigger_vram_shock()
-                elif args.enable_adversarial_chaos:
-                    chaos.trigger_adversarial_directive()
-                time.sleep(45.0)
-            time.sleep(5.0)
-
-    chaos_thread = threading.Thread(target=chaos_loop, daemon=True)
-    chaos_thread.start()
-
     start_time = time.perf_counter()
     result = runner.train_loop(
         total_steps=args.steps,
@@ -230,8 +219,8 @@ def main() -> None:
         checkpoint_interval=500,
         eval_window_steps=50,
         resume_from_checkpoint="latest" if args.resume_latest else None,
+        step_callback=chaos.on_step,
     )
-    chaos.stop_event.set()
     total_elapsed = time.perf_counter() - start_time
 
     print("\n" + "=" * 70)
