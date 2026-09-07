@@ -136,6 +136,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=100000, help="Total training steps for the stress test (default: 100,000)")
     parser.add_argument("--model-preset", default="xlarge_250m", help="Model preset: xlarge_250m, large_130m, medium_75m")
     parser.add_argument("--dataset-name", default="roneneldan/TinyStories", help="Dataset name on Hugging Face")
+    parser.add_argument("--dataset-config", default="", help="Dataset config name on Hugging Face (e.g. sample-10BT)")
     parser.add_argument("--precision", default="fp16", help="Precision: fp16 or bf16")
     parser.add_argument("--vram-shock-mb", type=int, default=1200, help="VRAM shock injection size in MB")
     parser.add_argument("--shock-interval-steps", type=int, default=500, help="Interval between chaos shocks in steps")
@@ -151,7 +152,7 @@ def main() -> None:
     print("  MEM ORCHESTRATOR — TESTE DE ESTRESSE EM AMBIENTE INÓSPITO (CHAOS SUITE)")
     print(f"  Dispositivo: {device_name} | Precisão: {args.precision.upper()}")
     print(f"  Modelo: {args.model_preset} (~255M parâmetros — Teste no limite de VRAM)")
-    print(f"  Dataset: {args.dataset_name} (Streaming)")
+    print(f"  Dataset: {args.dataset_name} ({args.dataset_config or 'default'}) (Streaming)")
     print(f"  Total de Steps do Teste: {args.steps:,} steps")
     print(f"  Choque de VRAM Externa: {args.vram_shock_mb} MB a cada {args.shock_interval_steps} steps ({args.shock_duration_steps} steps duração)")
     print(f"  Diretivas Adversariais: {'ATIVAS' if args.enable_adversarial_chaos else 'DESATIVADAS'}")
@@ -214,6 +215,7 @@ def main() -> None:
     result = runner.train_loop(
         total_steps=args.steps,
         dataset_name=args.dataset_name,
+        dataset_config=args.dataset_config,
         fallback_name="roneneldan/TinyStories",
         model_preset=args.model_preset,
         checkpoint_interval=500,
