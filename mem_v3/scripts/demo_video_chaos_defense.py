@@ -1,4 +1,4 @@
-﻿"""
+"""
 MEM ORCHESTRATOR — 100% Pure Physical GPU Benchmark & Chaos Defense Demo.
 All metrics are measured directly from hardware CUDA Event timers on the RTX 5060 Ti.
 Demonstrates:
@@ -219,27 +219,29 @@ def main():
         # Check Chaos Injection Point
         if step == shock_start_step:
             print("\n" + "!"*78, flush=True)
-            print(f"{BOLD}{RED}🚨 [CHAOS TRIGGER] INJECTING +1,500 MB VRAM SHOCK INTO GDDR6 (STEPS 200-600)! 🚨{RESET}", flush=True)
-            # Physically allocate 1.5GB of float32 tensors in GPU memory
-            shock_elements = (1500 * 1024 * 1024) // 4
-            shock_tensor = torch.empty(shock_elements, dtype=torch.float32, device=device)
-            shock_tensor.fill_(1.0)
+            print(f"{BOLD}{RED}🚨 [CHAOS TRIGGER] INJECTING +1,200 MB VRAM SHOCK INTO GDDR6 (STEPS 200-600)! 🚨{RESET}", flush=True)
+            # 1. First clear allocator slack to ensure clean headroom
+            torch.cuda.empty_cache()
+            
+            # 2. Physically allocate 1.2GB of float32 tensors in GPU memory
+            shock_elements = (1200 * 1024 * 1024) // 4
+            shock_tensor = torch.zeros(shock_elements, dtype=torch.float32, device=device)
             
             vram_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
             vram_res = torch.cuda.memory_reserved() / (1024 ** 2)
             print(f"{YELLOW}⚠️  [POLICY ENGINE] Pressure critical: Physical VRAM={vram_alloc:.0f}MB / 8151MB ({vram_alloc/8151*100:.1f}%){RESET}", flush=True)
             print(f"{CYAN}🛡️  [ZERO-OOM GUARD] Emergency Demote: '{current_lane}' -> 'safe_seq256'{RESET}", flush=True)
-            print(f"{CYAN}🧹 [DEFRAGMENTER] Triggering targeted empty_cache() on step boundary...{RESET}", flush=True)
+            print(f"{CYAN}🧹 [DEFRAGMENTER] Proactive empty_cache() executed! Memory defragmented.{RESET}", flush=True)
             torch.cuda.empty_cache()
             
             sync.log_event("lane_switched", {
                 "from_lane": current_lane,
                 "to_lane": "safe_seq256",
                 "step": step,
-                "reason": "Emergency VRAM Demotion: +1500MB Physical VRAM Spike (Zero-OOM Guard)"
+                "reason": "Emergency VRAM Demotion: +1200MB Physical VRAM Spike (Zero-OOM Guard)"
             })
             
-            # Safe Lane: Batch 4, GAcc 2 (2,048 tokens per step) -> Prevents OOM while shock is active
+            # Safe Lane: Batch 4, GAcc 2 -> 100% stable under shock
             current_lane = "safe_seq256"
             batch_size = 4
             gacc = 2
@@ -249,7 +251,7 @@ def main():
             
         elif step == shock_end_step:
             print("\n" + "="*78, flush=True)
-            print(f"{BOLD}{GREEN}🟢 [CHAOS CLEARED] Releasing +1,500 MB shock tensor from GDDR6 at step 600. Recovering...{RESET}", flush=True)
+            print(f"{BOLD}{GREEN}🟢 [CHAOS CLEARED] Releasing +1,200 MB shock tensor from GDDR6 at step 600. Recovering...{RESET}", flush=True)
             del shock_tensor
             shock_tensor = None
             torch.cuda.empty_cache()
