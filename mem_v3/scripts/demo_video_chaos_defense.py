@@ -1,4 +1,4 @@
-"""
+﻿"""
 MEM ORCHESTRATOR — 1,000-Step Live Chaos Defense Video Demonstration.
 Synchronized with Web Dashboard (http://localhost:8089) for real-time split screen.
 Demonstrates real-time +1.5GB VRAM shock injection, automatic LocalPolicyEngine demotion,
@@ -153,13 +153,13 @@ def main():
     print("\n" + "="*78, flush=True)
     print(f"{BOLD}{CYAN}  MEM ORCHESTRATOR — LIVE ZERO-OOM RESILIENCE DEMO (1,000 STEPS){RESET}", flush=True)
     print(f"  Device: {torch.cuda.get_device_name(0)} | Memory: 8GB GDDR6", flush=True)
-    print(f"  Model:  xlarge_250m (~255M Parameters, 16L / 1024D / 16H) in FP16/AMP", flush=True)
+    print(f"  Model:  xlarge_250m (~255M Parameters, 16L / 1024D / 16H) in FP16", flush=True)
     print(f"  Engine: LocalPolicyEngine Adaptive Lane Governance", flush=True)
     print("="*78 + "\n", flush=True)
     
-    # 1. Initialize Model
+    # 1. Initialize Model in FP16
     print(f"{CYAN}[1/3] Loading 255M Parameter Model into CUDA Memory...{RESET}", flush=True)
-    model = build_tiny_causal_lm(vocab_size=50257, seq_len=256, preset="xlarge_250m").to(device=device)
+    model = build_tiny_causal_lm(vocab_size=50257, seq_len=256, preset="xlarge_250m").to(device=device, dtype=torch.float16)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
     
@@ -179,6 +179,19 @@ def main():
         loss_first = 11.0
         loss_val = 11.0
     
+    # Warmup CUDA kernels so step 1 starts at full 11,800 tok/s
+    print(f"{CYAN}  -> Prewarming CUDA kernels & allocator buffers...{RESET}", flush=True)
+    for _ in range(3):
+        in_tmp = torch.randint(0, 50257, (6, 256), device=device, dtype=torch.long)
+        tar_tmp = torch.randint(0, 50257, (6, 256), device=device, dtype=torch.long)
+        with torch.amp.autocast("cuda", dtype=torch.float16):
+            log_tmp = model(in_tmp)
+            l_tmp = criterion(log_tmp.reshape(-1, log_tmp.shape[-1]), tar_tmp.reshape(-1))
+        l_tmp.backward()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+    torch.cuda.empty_cache()
+    
     total_steps = 1000
     shock_start_step = 200
     shock_end_step = 600
@@ -192,7 +205,7 @@ def main():
     
     print(f"{GREEN}[2/3] Starting Training in AGGRESSIVE Lane (~11,800 tok/s)...{RESET}", flush=True)
     print(f"{YELLOW}>>> Split your screen: Terminal on Left | Dashboard (http://localhost:8089) on Right <<<{RESET}\n", flush=True)
-    time.sleep(1.5)
+    time.sleep(1.0)
     
     for step in range(1, total_steps + 1):
         # Check Chaos Injection Point
