@@ -285,7 +285,7 @@ class AdaptiveLaneRunner:
             stable_windows += 1
 
         # Promotion logic (requires 3 consecutive stable windows above threshold and healthy VRAM)
-        if stable_windows >= 3 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5200.0:
+        if stable_windows >= 3 and data_wait_ratio <= 0.40 and vram_alloc_mb < 5200.0:
             if current.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
                 target_lane = self.lanes["fast_seq256_zero0_gacc4"]
                 promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.70)
