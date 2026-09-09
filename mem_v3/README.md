@@ -1,10 +1,10 @@
-﻿# MEM v3 — Model Execution Manager & LLM Training Orchestrator
+# MEM v3 — Model Execution Manager & LLM Training Orchestrator
 
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20(CUDA%20%2B%20CPU)-ee4c2c.svg)](https://pytorch.org/)
 [![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Enabled-00599C.svg)](https://www.deepspeed.ai/)
-[![Tests](https://img.shields.io/badge/Tests-33%2F33%20Passing-brightgreen)](tests/)
-[![Validation Status](https://img.shields.io/badge/Validation-1M%20Sustained%20Steps-success.svg)](#-endurance--validation-evidence)
+[![Tests](https://img.shields.io/badge/Tests-38%2F38%20Passing-brightgreen)](tests/)
+[![Validation Status](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps-success.svg)](#-endurance--validation-evidence)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > **MEM v3** is a high-throughput, fault-tolerant, zero-OOM orchestration engine designed for sustained Large Language Model (LLM) pre-training and fine-tuning on PyTorch and DeepSpeed.
@@ -15,14 +15,42 @@
 
 Training Large Language Models at scale is inherently risky and expensive. Out-Of-Memory (OOM) exceptions, node failures, and unvalidated hyperparameter tweaks often lead to dead compute time costing thousands of dollars.
 
-**MEM v3** solves this by establishing a **Zero-Trust Policy Engine** over LLM training runs. It dynamically inspects GPU environments, clamps unsafe AI-generated executive directives, manages rotating durable checkpoints, and applies adaptive memory clamping to sustain massive pre-training workloads without crashes.
+**MEM v3** solves this by establishing an **Autonomous Memory Governance Engine** over LLM training runs. It dynamically inspects GPU environments, clamps unsafe AI-generated executive directives, manages rotating durable checkpoints, and applies adaptive sub-millisecond lane downshifting to sustain massive pre-training workloads without crashes.
 
 ```txt
-Key Metric Highlight:
-- Sustained Endurance: 1,000,000 Steps Completed
-- Peak Throughput: ~45,600 tokens/sec
+Empirical Validation Highlights:
+- Sustained Scale: 1,000,000 continuous steps on 130M model (3.49B tokens, 0 OOMs)
+- Chaos Resilience: 100,000 steps on 255M model under 71 dynamic VRAM shocks
+- Web-Scale Convergence: 50,000 steps on FineWeb-Edu with 150 live +1.2GB VRAM shocks (loss 11.0 -> 0.004)
 - Fatal OOM Crashes: 0
 - Atomic Checkpoint Recovery: 100% Continuous with SHA256 verification
+```
+
+---
+
+## 🌿 Repository Branches
+
+The codebase provides two specialized branches tailored to different deployment targets:
+
+| Branch | Target Environment | Core Technology | Best Used For |
+| :--- | :--- | :--- | :--- |
+| **`main`** | **Linux / WSL2 Production** | DeepSpeed ZeRO-0/1/2/3 + PyTorch | Distributed clusters, multi-GPU scaling, and Linux server deployments. |
+| **`refactor/architecture-and-portability`** | **Cross-Platform / Consumer Hardware** | Pure Native PyTorch + `LocalPolicyEngine` | Workstations and edge GPUs (Windows / WSL / Linux). Decouples DeepSpeed C++ compilation dependencies while preserving the full autonomous lane-switching engine. |
+
+---
+
+## ⚙️ Environment Configuration & Optional AI Consultant
+
+**MEM v3 runs 100% locally and offline by default.** No external API keys are required for core training, lane switching, or memory governance.
+
+To optionally enable the external AI Executive Consultant (GPT-4o) for hyperparameter suggestions (safely evaluated and clamped by `LocalPolicyEngine`):
+
+```bash
+# Copy the example environment template
+cp .env.example .env
+
+# Set your key inside .env (never committed to git)
+OPENAI_API_KEY=your_key_here
 ```
 
 ---

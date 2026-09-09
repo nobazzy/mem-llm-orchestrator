@@ -1,4 +1,4 @@
-﻿# ⚡ MEM v3 — Guia Técnico e Manual Operacional
+# ⚡ MEM v3 — Guia Técnico e Manual Operacional
 
 > **Guia completo de arquitetura, configuração de ambiente (WSL2/Linux e Multiplataforma), execução do orquestrador e políticas de segurança.**
 
@@ -27,9 +27,36 @@ Treinos longos de IA frequentemente sofrem paradas silenciosas e catastróficas:
 
 ### 🛡️ A Filosofia
 > **"AI proposes. Local policy decides. Runtime executes. Feedback improves."**
-* A IA (OpenAI GPT-4o) atua como consultora e planejadora de hiperparâmetros.
+* A IA (OpenAI GPT-4o) atua opcionalmente como consultora de hiperparâmetros.
 * O `LocalPolicyEngine` age como firewall matemático determinístico.
 * O hardware só executa configurações validadas e protegidas por tetos rígidos.
+
+---
+
+## 🌿 Estrutura de Branches do Repositório
+
+O projeto possui duas branches com objetivos e ambientes específicos:
+
+| Branch | Ambiente Alvo | Tecnologia Base | Aplicação Ideal |
+| :--- | :--- | :--- | :--- |
+| **`main`** | **Linux / WSL2 Produção** | DeepSpeed ZeRO-0/1/2/3 + PyTorch | Servidores, clusters distribuídos e treinamento multi-GPU de alta performance em Linux. |
+| **`refactor/architecture-and-portability`** | **Multiplataforma / Hardware de Consumo** | PyTorch Nativo + `LocalPolicyEngine` | Workstations e GPUs de consumo (Windows / WSL / Linux). Desacopla dependências de compilação C++ do DeepSpeed mantendo o motor autônomo de troca de faixas. |
+
+---
+
+## ⚙️ Configuração de Ambiente (.env) e Modo 100% Local
+
+**O MEM v3 opera 100% local e offline por padrão.** Nenhuma chave de API externa é necessária para treinar, gerenciar VRAM ou alternar faixas.
+
+Caso deseje ativar o consultor executivo externo de IA (GPT-4o) para sugestões de taxa de aprendizado e clipping:
+
+```bash
+# Copie o arquivo de exemplo
+cp .env.example .env
+
+# Configure sua chave dentro do .env (nunca é enviado ao GitHub)
+OPENAI_API_KEY=sua_chave_aqui
+```
 
 ---
 
@@ -107,7 +134,7 @@ O `CheckpointManager` utiliza um protocolo à prova de falhas:
 
 ## 6. Suíte de Testes e Validação
 
-Execute a suíte de testes com 33 validações automatizadas:
+Execute a suíte de testes com 38 validações automatizadas:
 
 ```bash
 # Rodar todos os testes unitários e funcionais
