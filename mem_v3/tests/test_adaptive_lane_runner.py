@@ -39,8 +39,8 @@ def test_get_lanes_for_model_configurations():
 
     lanes_250m = get_lanes_for_model("xlarge_250m")
     assert "aggressive_seq256_zero0_gacc4" in lanes_250m
-    assert lanes_250m["aggressive_seq256_zero0_gacc4"].batch_size == 8
-    assert lanes_250m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 6000.0
+    assert lanes_250m["aggressive_seq256_zero0_gacc4"].batch_size == 6
+    assert lanes_250m["aggressive_seq256_zero0_gacc4"].min_tokens_floor == 5500.0
 
 
 def test_adaptive_lane_runner_transitions():
