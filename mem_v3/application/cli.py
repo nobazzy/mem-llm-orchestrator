@@ -162,7 +162,9 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Dataset: {args.dataset_name} (Streaming) [Fallback: {args.dataset_fallback_name}]")
     print(f"  Modelo: {args.model_preset} (SDPA Flash Attention)")
     print(f"  Resume Checkpoint: {resume_target if resume_target else 'Não (Início do zero)'}")
-    print(f"  Governança: LocalPolicyEngine (100% Local / Zero Dependência Externa)")
+    llm_active = bool(api_key or args.llm)
+    gov_label = "LocalPolicyEngine + Consultor Executivo IA (Ativo)" if llm_active else "LocalPolicyEngine (Modo Autônomo Local)"
+    print(f"  Governança: {gov_label}")
     print("============================================================\n")
 
     context = OrchestratorContext(_root)
@@ -181,11 +183,14 @@ def main(argv: list[str] | None = None) -> None:
         sequence_length=args.sequence_length,
         model_preset=args.model_preset,
         benchmark_mode="mem_native_pytorch",
-        llm_enabled=bool(api_key or args.llm),
+        llm_enabled=llm_active,
         api_executive_moderate=bool(api_key or args.api_executive_moderate),
     ).normalized()
 
-    print("[1/2] Inicializando LocalPolicyEngine...")
+    if llm_active:
+        print("[1/2] Consultando LLMPlanner para diretivas de ajuste fino...")
+    else:
+        print("[1/2] Inicializando LocalPolicyEngine (Heurística Local)...")
     plan = context.llm.plan(req)
     print(f"  -> Plano de execução: {plan.source} | Política: {plan.rationale[:80]}...")
 
