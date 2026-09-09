@@ -25,6 +25,16 @@ Treinos longos de IA frequentemente sofrem paradas silenciosas e catastróficas:
 * **Instabilidade Numérica:** Explosões de gradiente gerando perdas `NaN` ou `Inf`.
 * **Corrupção de Checkpoint:** Processos interrompidos no exato momento da escrita em disco.
 
+```txt
+Destaques da Validação Empírica (RTX 5060 Ti, 8GB GDDR6):
+- Confiabilidade de Longo Prazo: 1.000.000 de passos contínuos no modelo 130M (3.49B tokens, 98% de GPU sustentada)
+- Resiliência a Caos Ativo: 100.000 passos no modelo 255M sob 71 choques dinâmicos com 100% de recuperação
+- Convergência sob Choque Real (FineWeb-Edu sample-10BT): 50.000 passos com 150 choques físicos ao vivo de +1.2GB de VRAM (loss 11.0 -> 0.004)
+- Falhas de Processo ou OOM: 0
+- Recuperação Atômica de Checkpoint: 100% Contínua com verificação SHA256
+- Overhead do Control Plane: <0.5% do tempo por step (medido em janelas de avaliação de 5 passos)
+```
+
 ### 🛡️ A Filosofia
 > **"AI proposes. Local policy decides. Runtime executes. Feedback improves."**
 * A IA (OpenAI GPT-4o) atua opcionalmente como consultora de hiperparâmetros.

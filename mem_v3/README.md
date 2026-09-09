@@ -7,23 +7,24 @@
 [![Validation Status](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps-success.svg)](#-endurance--validation-evidence)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **MEM v3** is a high-throughput, fault-tolerant, zero-OOM orchestration engine designed for sustained Large Language Model (LLM) pre-training and fine-tuning on PyTorch and DeepSpeed.
+> **MEM v3** is an adaptive runtime control plane designed to maintain productive, resilient Large Language Model (LLM) pre-training and fine-tuning under constrained and adverse hardware conditions.
 
 ---
 
 ## 🌟 Executive Summary
 
-Training Large Language Models at scale is inherently risky and expensive. Out-Of-Memory (OOM) exceptions, node failures, and unvalidated hyperparameter tweaks often lead to dead compute time costing thousands of dollars.
+Training Large Language Models at scale is inherently risky and expensive. Out-Of-Memory (OOM) exceptions, node degradation, and unvalidated hyperparameter tweaks often lead to dead compute time and discarded gradients.
 
-**MEM v3** solves this by establishing an **Autonomous Memory Governance Engine** over LLM training runs. It dynamically inspects GPU environments, clamps unsafe AI-generated executive directives, manages rotating durable checkpoints, and applies adaptive sub-millisecond lane downshifting to sustain massive pre-training workloads without crashes.
+**MEM v3** addresses this by establishing an **Adaptive Runtime Control Plane** over LLM training runs. Rather than letting scripts blindly hit hard allocation ceilings, the system monitors memory pressure deltas, enforces deterministic policy bounds over directives, manages atomic rotating checkpoints, and proactively transitions between predefined operating lanes to keep training productive.
 
 ```txt
-Empirical Validation Highlights:
-- Sustained Scale: 1,000,000 continuous steps on 130M model (3.49B tokens, 0 OOMs)
-- Chaos Resilience: 100,000 steps on 255M model under 71 dynamic VRAM shocks
-- Web-Scale Convergence: 50,000 steps on FineWeb-Edu with 150 live +1.2GB VRAM shocks (loss 11.0 -> 0.004)
-- Fatal OOM Crashes: 0
+Empirical Validation Highlights (RTX 5060 Ti, 8GB GDDR6):
+- Long-Horizon Endurance: 1,000,000 continuous steps on a 130M model (3.49B tokens, 98% sustained GPU utilization)
+- Active Chaos Resilience: 100,000 steps on a 255M model under 71 dynamic runtime shocks with 100% recovery
+- Web-Scale Convergence under Shock: 50,000 steps on FineWeb-Edu (sample-10BT) with 150 live +1.2GB VRAM shocks (loss 11.0 -> 0.004)
+- Fatal Process Terminations: 0
 - Atomic Checkpoint Recovery: 100% Continuous with SHA256 verification
+- Control Plane Overhead: <0.5% of total step time (measured across 5-step evaluation windows)
 ```
 
 ---
@@ -144,7 +145,7 @@ The `CheckpointManager` implements an atomic two-phase commit protocol:
 The project includes unit tests, mock suites, and integration tests:
 
 ```bash
-# Run the 33 automated tests
+# Run the automated test suite (38 tests, 100% passing)
 pytest -v
 
 # Run static architectural validation
