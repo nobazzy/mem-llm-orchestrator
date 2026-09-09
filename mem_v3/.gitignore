@@ -38,6 +38,7 @@ chaos_tmp/
 # Secrets
 .env
 .env.*
+!.env.example
 *.env
 secrets.*
 *_API_KEY*
