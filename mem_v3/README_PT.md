@@ -35,6 +35,51 @@ Destaques da Validação Empírica (RTX 5060 Ti, 8GB GDDR6):
 - Overhead do Control Plane: <0.5% do tempo por step (medido em janelas de avaliação de 5 passos)
 ```
 
+### 📊 Evidência Empírica: Absorção de Choques de VRAM em Hardware de 8GB
+
+![MEM Orchestrator VRAM Benchmark](assets/mem_orchestrator_vram_benchmark.png)
+
+---
+
+## ⚡ Início Rápido: Rodando em 60 Segundos
+
+Você pode iniciar uma sessão de treino adaptativo imediatamente sem chaves externas de API:
+
+```bash
+# 1. Clone o repositório
+git clone https://github.com/nobazzy/mem-llm-orchestrator.git
+cd mem-llm-orchestrator/mem_v3
+
+# 2. Instale as dependências
+pip install -r requirements.txt
+
+# 3. Inicie o treino adaptativo ao vivo (100% local com PyTorch)
+python scripts/run_live_training.py --steps 1000 --batch-size 6 --dataset tinystories
+```
+
+### 🔌 Uso Programático no seu Loop de Treino
+
+```python
+from runtime.controller.lane_manager import LaneManager
+from runtime.controller.degradation_detector import DegradationDetector
+
+# Inicializa o governador de runtime
+lane_mgr = LaneManager(target_vram_gb=7.5)
+detector = DegradationDetector(patience=3)
+
+# Dentro do seu loop de treino PyTorch:
+for step, batch in enumerate(dataloader):
+    # Avalia a margem de VRAM e reduz o micro-batch dinamicamente sob pressão
+    current_lane = lane_mgr.evaluate_headroom(step=step)
+    batch_size = current_lane.batch_size
+    
+    loss = model(batch[:batch_size])
+    loss.backward()
+    optimizer.step()
+```
+
+---
+
 ### 🛡️ A Filosofia
 > **"AI proposes. Local policy decides. Runtime executes. Feedback improves."**
 * A IA (OpenAI GPT-4o) atua opcionalmente como consultora de hiperparâmetros.

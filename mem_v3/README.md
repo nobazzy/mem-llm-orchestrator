@@ -27,6 +27,49 @@ Empirical Validation Highlights (RTX 5060 Ti, 8GB GDDR6):
 - Control Plane Overhead: <0.5% of total step time (measured across 5-step evaluation windows)
 ```
 
+### 📊 Empirical Evidence: VRAM Shock Absorption on 8GB Hardware
+
+![MEM Orchestrator VRAM Benchmark](assets/mem_orchestrator_vram_benchmark.png)
+
+---
+
+## ⚡ Quickstart: Running in 60 Seconds
+
+You can launch a live adaptive training run immediately without external API keys:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/nobazzy/mem-llm-orchestrator.git
+cd mem-llm-orchestrator/mem_v3
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Launch live adaptive training (runs 100% locally with PyTorch)
+python scripts/run_live_training.py --steps 1000 --batch-size 6 --dataset tinystories
+```
+
+### 🔌 Programmatic Usage in Your Training Loop
+
+```python
+from runtime.controller.lane_manager import LaneManager
+from runtime.controller.degradation_detector import DegradationDetector
+
+# Initialize the runtime governor
+lane_mgr = LaneManager(target_vram_gb=7.5)
+detector = DegradationDetector(patience=3)
+
+# Inside your training loop:
+for step, batch in enumerate(dataloader):
+    # Check VRAM headroom and dynamically throttle micro-batch if pressured
+    current_lane = lane_mgr.evaluate_headroom(step=step)
+    batch_size = current_lane.batch_size
+    
+    loss = model(batch[:batch_size])
+    loss.backward()
+    optimizer.step()
+```
+
 ---
 
 ## 🌿 Repository Branches
