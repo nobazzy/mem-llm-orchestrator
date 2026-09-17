@@ -1,17 +1,17 @@
-# MEM v3 — Model Execution Manager & LLM Training Orchestrator
+# MEM v3 - Model Execution Manager & LLM Training Orchestrator
 
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20(CUDA%20%2B%20CPU)-ee4c2c.svg)](https://pytorch.org/)
 [![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Enabled-00599C.svg)](https://www.deepspeed.ai/)
 [![Tests](https://img.shields.io/badge/Tests-38%2F38%20Passing-brightgreen)](tests/)
-[![Validation Status](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps-success.svg)](#-endurance--validation-evidence)
+[![Validation Status](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps-success.svg)](EVALUATION.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > **MEM v3** is an adaptive runtime control plane designed to maintain productive, resilient Large Language Model (LLM) pre-training and fine-tuning under constrained and adverse hardware conditions.
 
 ---
 
-## 🌟 Executive Summary
+## Executive Summary
 
 Training Large Language Models at scale is inherently risky and expensive. Out-Of-Memory (OOM) exceptions, node degradation, and unvalidated hyperparameter tweaks often lead to dead compute time and discarded gradients.
 
@@ -27,13 +27,15 @@ Empirical Validation Highlights (RTX 5060 Ti, 8GB GDDR6):
 - Control Plane Overhead: <0.5% of total step time (measured across 5-step evaluation windows)
 ```
 
-### 📊 Empirical Evidence: VRAM Shock Absorption on 8GB Hardware
+### Empirical Evidence: VRAM Shock Absorption and Convergence
 
 ![MEM Orchestrator VRAM Benchmark](assets/mem_orchestrator_vram_benchmark.png)
 
+![MEM Orchestrator FineWeb-Edu Convergence and Shock Resilience](assets/mem_orchestrator_definitive_evidence.png)
+
 ---
 
-## ⚡ Quickstart: Running in 60 Seconds
+## Quickstart: Running in 60 Seconds
 
 You can launch a live adaptive training run immediately without external API keys:
 
@@ -49,7 +51,7 @@ pip install -r requirements.txt
 python scripts/run_live_training.py --steps 1000 --batch-size 6 --dataset tinystories
 ```
 
-### 🔌 Programmatic Usage in Your Training Loop
+### Programmatic Usage in Your Training Loop
 
 ```python
 from runtime.controller.lane_manager import LaneManager
@@ -72,7 +74,7 @@ for step, batch in enumerate(dataloader):
 
 ---
 
-## 🌿 Repository Branches
+## Repository Branches
 
 The codebase provides two specialized branches tailored to different deployment targets:
 
@@ -83,7 +85,7 @@ The codebase provides two specialized branches tailored to different deployment 
 
 ---
 
-## ⚙️ Environment Configuration & Optional AI Consultant
+## Environment Configuration & Optional AI Consultant
 
 **MEM v3 runs 100% locally and offline by default.** No external API keys are required for core training, lane switching, or memory governance.
 
@@ -99,7 +101,7 @@ OPENAI_API_KEY=your_key_here
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 MEM v3 is engineered following **Clean Architecture** and **Domain-Driven Design (DDD)** principles to guarantee strict isolation between core business rules, execution policies, and hardware runtime layers.
 
@@ -146,7 +148,7 @@ graph TD
 
 ---
 
-## 🛡️ Zero-Trust Policy Engine (AI Directive Clamping)
+## Zero-Trust Policy Engine (AI Directive Clamping)
 
 When using AI agents or external APIs (e.g. OpenAI GPT-4o) to optimize training hyperparameters (learning rate multipliers, gradient clip norms, loss scaling), **MEM v3 never executes untrusted directives directly**.
 
@@ -171,7 +173,7 @@ flowchart LR
 
 ---
 
-## 🔄 Atomic Durable Checkpointing
+## Atomic Durable Checkpointing
 
 The `CheckpointManager` implements an atomic two-phase commit protocol:
 
@@ -183,7 +185,7 @@ The `CheckpointManager` implements an atomic two-phase commit protocol:
 
 ---
 
-## 🧪 Comprehensive Test Suite
+## Comprehensive Test Suite
 
 The project includes unit tests, mock suites, and integration tests:
 
@@ -197,5 +199,5 @@ python scripts/v89_static_validation.py
 
 ---
 
-## 📜 License
+## License
 Distributed under the MIT License. See [`LICENSE`](LICENSE) for more details.
