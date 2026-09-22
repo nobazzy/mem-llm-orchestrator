@@ -363,18 +363,41 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         type: 'line',
         data: {
           labels: [],
-          datasets: [{
-            data: [],
-            borderColor: '#818cf8',
-            backgroundColor: 'rgba(129, 140, 248, 0.08)',
-            fill: true,
-            tension: 0.1,
-            pointRadius: 0,
-            pointHoverRadius: 4,
-            borderWidth: 1.8
-          }]
+          datasets: [
+            {
+              label: 'Train Loss (EMA)',
+              data: [],
+              borderColor: '#818cf8',
+              backgroundColor: 'rgba(129, 140, 248, 0.08)',
+              fill: true,
+              tension: 0.1,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              borderWidth: 1.8
+            },
+            {
+              label: 'Val Loss (Unseen)',
+              data: [],
+              borderColor: '#38bdf8',
+              backgroundColor: 'rgba(56, 189, 248, 0.2)',
+              fill: false,
+              tension: 0.1,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              borderWidth: 2,
+              spanGaps: true
+            }
+          ]
         },
-        options: chartDefaults
+        options: {
+          ...chartDefaults,
+          plugins: {
+            legend: {
+              display: true,
+              labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } }
+            }
+          }
+        }
       });
 
       const tpCtx = document.getElementById('throughputChart').getContext('2d');
@@ -463,7 +486,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       // KPI Loss
       const currentLoss = (p.loss !== undefined && p.loss !== null) ? Number(p.loss) : (ctrl.loss !== undefined ? Number(ctrl.loss) : null);
       if (currentLoss !== null) {
-        document.getElementById('kpi-loss').innerText = currentLoss.toFixed(4);
+        const valLoss = (p.val_loss !== undefined && p.val_loss !== null) ? Number(p.val_loss) : null;
+        if (valLoss !== null) {
+          document.getElementById('kpi-loss').innerHTML = `${currentLoss.toFixed(4)} <span class="text-xs text-sky-400 font-normal">(Val: ${valLoss.toFixed(4)})</span>`;
+        } else {
+          document.getElementById('kpi-loss').innerText = currentLoss.toFixed(4);
+        }
         const lossFirst = p.loss_first || 1.7348;
         const lossDelta = lossFirst > 0 ? (((currentLoss - lossFirst) / lossFirst) * 100).toFixed(1) : 0;
         document.getElementById('kpi-loss-trend').innerText = `Inicial: ${lossFirst.toFixed(4)} → Atual: ${currentLoss.toFixed(4)} (${lossDelta > 0 ? '+' : ''}${lossDelta}%)`;
@@ -573,6 +601,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       if (!milestones || milestones.length === 0) return;
       const labels = milestones.map(m => m.step);
       const rawLosses = milestones.map(m => m.loss);
+      const valLosses = milestones.map(m => (m.val_loss !== undefined && m.val_loss !== null) ? Number(m.val_loss) : null);
       const tokens = milestones.map(m => m.tokens_per_second || 0);
 
       let ema = rawLosses[0];
@@ -583,6 +612,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
       lossChart.data.labels = labels;
       lossChart.data.datasets[0].data = smoothedLosses;
+      lossChart.data.datasets[1].data = valLosses;
       lossChart.update('none');
 
       throughputChart.data.labels = labels;

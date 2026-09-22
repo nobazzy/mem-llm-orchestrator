@@ -319,6 +319,11 @@ class AdaptiveLaneRunner:
         eval_window_steps: int = 50,
         resume_from_checkpoint: Optional[str | Path | bool] = None,
         step_callback: Optional[Any] = None,
+        val_interval: int = 500,
+        val_steps: int = 10,
+        val_dataset_name: Optional[str] = None,
+        val_dataset_config: Optional[str] = None,
+        val_split: str = "validation",
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
@@ -338,6 +343,27 @@ class AdaptiveLaneRunner:
             batch_size=self.current_lane.batch_size,
             device=device,
         )
+
+        val_batcher: Optional[RealDatasetBatcher] = None
+        self.latest_val_loss: Optional[float] = None
+        if val_interval > 0:
+            try:
+                v_ds_name = val_dataset_name or ("roneneldan/TinyStories" if "fineweb" in dataset_name.lower() else dataset_name)
+                v_ds_cfg = val_dataset_config or ("default" if v_ds_name == "roneneldan/TinyStories" else dataset_config)
+                val_batcher = RealDatasetBatcher(
+                    dataset_name=v_ds_name,
+                    dataset_config=v_ds_cfg,
+                    fallback_name=fallback_name,
+                    split=val_split,
+                    streaming=True,
+                    tokenizer_name="gpt2",
+                    sequence_length=self.current_lane.sequence_length,
+                    batch_size=self.current_lane.batch_size,
+                    device=device,
+                )
+                print(f"  -> Validador configurado: {v_ds_name} (split: '{val_split}') a cada {val_interval} steps.")
+            except Exception as _val_err:
+                print(f"  [Validation Warning] Não foi possível iniciar validador: {_val_err}")
 
         model = build_tiny_causal_lm(
             vocab_size=batcher.vocab_size,
@@ -447,6 +473,27 @@ class AdaptiveLaneRunner:
             total_step_time = time.perf_counter() - t_step_start
             step_durations.append(total_step_time)
 
+            if val_batcher is not None and (step % val_interval == 0 or step == (initial_step + 1) or step == total_steps):
+                model.eval()
+                v_losses = []
+                with torch.no_grad():
+                    for _ in range(val_steps):
+                        try:
+                            v_in, v_lab = val_batcher.next_batch()
+                            if use_amp:
+                                with torch.amp.autocast(device_type="cuda", dtype=amp_dtype):
+                                    v_logits = model(v_in)
+                                    v_l = criterion(v_logits.reshape(-1, v_logits.shape[-1]), v_lab.reshape(-1))
+                            else:
+                                v_logits = model(v_in)
+                                v_l = criterion(v_logits.reshape(-1, v_logits.shape[-1]), v_lab.reshape(-1))
+                            v_losses.append(float(v_l.detach().item()))
+                        except Exception:
+                            break
+                model.train()
+                if v_losses:
+                    self.latest_val_loss = round(sum(v_losses) / len(v_losses), 4)
+
             if step % eval_window_steps == 0 or step == total_steps or step == (initial_step + 1):
                 window_elapsed = max(time.perf_counter() - window_start_time, 1e-6)
                 win_tok_sec = window_tokens / window_elapsed
@@ -469,6 +516,7 @@ class AdaptiveLaneRunner:
                     "cumulative_tokens_per_second": round(cum_tok_sec, 2),
                     "steps_per_second": round(win_step_sec, 2),
                     "loss": round(loss_val, 4),
+                    "val_loss": self.latest_val_loss,
                     "loss_first": round(loss_first, 4) if loss_first else None,
                     "loss_last": round(loss_last, 4),
                     "phase": "training",
@@ -483,6 +531,7 @@ class AdaptiveLaneRunner:
                     milestone_entry = {
                         "step": step,
                         "loss": round(loss_val, 4),
+                        "val_loss": self.latest_val_loss,
                         "tokens_per_second": round(win_tok_sec, 2),
                         "steps_per_second": round(win_step_sec, 2),
                         "tokens_processed": total_tokens_processed,
@@ -592,6 +641,10 @@ class AdaptiveLaneRunner:
                         batcher.batch_size = new_lane.batch_size
                         batcher._target_buffer = (batcher.sequence_length + 1) * batcher.batch_size * 16
                         batcher._refill_watermark = (batcher.sequence_length + 1) * batcher.batch_size * 4
+                        if val_batcher is not None:
+                            val_batcher.batch_size = new_lane.batch_size
+                            val_batcher._target_buffer = (val_batcher.sequence_length + 1) * val_batcher.batch_size * 16
+                            val_batcher._refill_watermark = (val_batcher.sequence_length + 1) * val_batcher.batch_size * 4
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                             import gc
