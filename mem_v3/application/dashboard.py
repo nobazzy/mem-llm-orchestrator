@@ -634,6 +634,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: Any) -> None:
+        """Silence HTTP access logging to keep terminal completely clean."""
+        return
+
     def do_GET(self) -> None:
         if self.path in {"/", "/index.html"}:
             self.send_response(200)
