@@ -33,21 +33,21 @@ def get_lanes_for_model(model_preset: str = "medium_75m") -> Dict[str, LaneConfi
         return {
             "aggressive_seq256_zero0_gacc4": LaneConfig(
                 name="aggressive_seq256_zero0_gacc4",
-                batch_size=8,
+                batch_size=6,
                 sequence_length=256,
-                gradient_accumulation_steps=4,
-                min_tokens_floor=6000.0,
-                expected_peak_tokens=22000.0,
+                gradient_accumulation_steps=2,
+                min_tokens_floor=5500.0,
+                expected_peak_tokens=14000.0,
                 precision="fp16",
                 notes="Primary 250M high-capacity lane",
             ),
             "fast_seq256_zero0_gacc4": LaneConfig(
                 name="fast_seq256_zero0_gacc4",
-                batch_size=6,
+                batch_size=5,
                 sequence_length=256,
-                gradient_accumulation_steps=4,
+                gradient_accumulation_steps=2,
                 min_tokens_floor=4500.0,
-                expected_peak_tokens=16000.0,
+                expected_peak_tokens=12000.0,
                 precision="fp16",
                 notes="Fast fallback 250M lane",
             ),
@@ -167,7 +167,7 @@ class AdaptiveLaneRunner:
         self.controller_status_file = self.evidence_dir.parent / "v89_controller_status_latest.json"
         self.lane_history: List[Dict[str, Any]] = []
         self.last_switch_step = 0
-        self.min_switch_cooldown_steps = 300
+        self.min_switch_cooldown_steps = 100
 
     def _log_event(self, event_type: str, payload: Dict[str, Any]) -> None:
         entry = {
@@ -240,18 +240,20 @@ class AdaptiveLaneRunner:
         bad_windows: int,
         stable_windows: int = 0,
     ) -> Tuple[Optional[LaneConfig], str, int, int]:
-        """Evaluates whether to switch lane (Promotion or Demotion) with anti-flapping hysteresis."""
+        """Evaluates whether to switch lane (Promotion or Demotion) with dynamic adaptive response."""
         current = self.current_lane
 
         # Check VRAM headroom for 8GB GPU
         vram_alloc_mb = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
-        if vram_alloc_mb > 6500.0 and current.name != "safe_seq256" and "safe_seq256" in self.lanes:
+        if vram_alloc_mb > 5800.0 and current.name != "safe_seq256" and "safe_seq256" in self.lanes:
             self.last_switch_step = step
-            return self.lanes["safe_seq256"], f"Emergency VRAM Demotion: {vram_alloc_mb:.0f} MB > 6500 MB ceiling (Zero-OOM Guard)", 0, 0
+            return self.lanes["safe_seq256"], f"Emergency VRAM Demotion: {vram_alloc_mb:.0f} MB > 5800 MB ceiling (Zero-OOM Guard)", 0, 0
 
-        # Cooldown guard: prevent flapping within cooldown window
-        if (step - self.last_switch_step) < self.min_switch_cooldown_steps:
-            return None, "cooldown_active", 0, 0
+        # Cooldown guard: prevent rapid flapping, but allow emergency demotion if throughput is severely collapsed (< 50% floor)
+        is_severe_drop = (window_tokens_sec < current.min_tokens_floor * 0.50)
+        cooldown_steps = 100 if is_severe_drop else self.min_switch_cooldown_steps
+        if (step - self.last_switch_step) < cooldown_steps and not is_severe_drop:
+            return None, "cooldown_active", bad_windows, stable_windows
 
         reasons = []
         if window_tokens_sec < current.min_tokens_floor:
@@ -261,11 +263,11 @@ class AdaptiveLaneRunner:
         if data_wait_ratio > 0.35:
             reasons.append("data_wait_severe")
 
-        # Demotion logic (requires 5 consecutive bad windows)
+        # Demotion logic (requires 2 consecutive bad windows or 1 severe window)
         if "below_lane_min_tokens" in reasons:
-            bad_windows += 1
+            bad_windows += 2 if is_severe_drop else 1
             stable_windows = 0
-            if bad_windows >= 5:
+            if bad_windows >= 2:
                 if current.name == "ultra_peak_seq256" and "aggressive_seq256_zero0_gacc4" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["aggressive_seq256_zero0_gacc4"], f"Demoting to aggressive: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
@@ -275,24 +277,33 @@ class AdaptiveLaneRunner:
                 elif current.name == "fast_seq256_zero0_gacc4" and "safe_seq256" in self.lanes:
                     self.last_switch_step = step
                     return self.lanes["safe_seq256"], f"Demoting to safe recovery: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
+                elif current.name != "safe_seq256" and "safe_seq256" in self.lanes:
+                    self.last_switch_step = step
+                    return self.lanes["safe_seq256"], f"Emergency recovery to safe lane: throughput {window_tokens_sec:.0f} < floor {current.min_tokens_floor:.0f}", 0, 0
         else:
             bad_windows = max(0, bad_windows - 1)
             stable_windows += 1
 
-        # Promotion logic (requires 5 consecutive stable windows above threshold and healthy VRAM)
-        if stable_windows >= 5 and optimizer_ratio <= 0.35 and vram_alloc_mb < 5500.0:
+        # Promotion logic (requires 3 consecutive stable windows above threshold and healthy VRAM)
+        if stable_windows >= 3 and data_wait_ratio <= 0.40 and vram_alloc_mb < 5200.0:
             if current.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
-                if window_tokens_sec >= 18000.0:
+                target_lane = self.lanes["fast_seq256_zero0_gacc4"]
+                promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.70)
+                if window_tokens_sec >= promote_thresh:
                     self.last_switch_step = step
-                    return self.lanes["fast_seq256_zero0_gacc4"], f"Promoting to fast lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
+                    return target_lane, f"Promoting to fast lane: sustained throughput {window_tokens_sec:.0f} tok/s >= {promote_thresh:.0f}", 0, 0
             elif current.name == "fast_seq256_zero0_gacc4" and "aggressive_seq256_zero0_gacc4" in self.lanes:
-                if window_tokens_sec >= 24000.0:
+                target_lane = self.lanes["aggressive_seq256_zero0_gacc4"]
+                promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.70)
+                if window_tokens_sec >= promote_thresh:
                     self.last_switch_step = step
-                    return self.lanes["aggressive_seq256_zero0_gacc4"], f"Promoting to aggressive lane: sustained throughput {window_tokens_sec:.0f} tok/s", 0, 0
+                    return target_lane, f"Promoting to aggressive lane: sustained throughput {window_tokens_sec:.0f} tok/s >= {promote_thresh:.0f}", 0, 0
             elif current.name == "aggressive_seq256_zero0_gacc4" and "ultra_peak_seq256" in self.lanes:
-                if window_tokens_sec >= 32000.0:
+                target_lane = self.lanes["ultra_peak_seq256"]
+                promote_thresh = max(target_lane.min_tokens_floor, current.expected_peak_tokens * 0.75)
+                if window_tokens_sec >= promote_thresh:
                     self.last_switch_step = step
-                    return self.lanes["ultra_peak_seq256"], f"Promoting to ultra-peak lane: sustained throughput {window_tokens_sec:.0f} tok/s on 8GB GPU", 0, 0
+                    return target_lane, f"Promoting to ultra-peak lane: sustained throughput {window_tokens_sec:.0f} tok/s >= {promote_thresh:.0f}", 0, 0
 
         return None, "keep_current_lane", bad_windows, stable_windows
 
@@ -307,6 +318,7 @@ class AdaptiveLaneRunner:
         checkpoint_interval: int = 500,
         eval_window_steps: int = 50,
         resume_from_checkpoint: Optional[str | Path | bool] = None,
+        step_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
@@ -493,6 +505,19 @@ class AdaptiveLaneRunner:
                     efficiency_score=efficiency_score,
                 )
 
+                if step_callback is not None:
+                    try:
+                        step_callback(step, loss_val, win_tok_sec, self)
+                    except Exception:
+                        pass
+
+                # Continuous VRAM defragmentation guard against Windows WDDM caching allocator hoarding
+                if torch.cuda.is_available():
+                    _v_res = torch.cuda.memory_reserved() / (1024 ** 2)
+                    _v_alloc = torch.cuda.memory_allocated() / (1024 ** 2)
+                    if _v_res > 5500.0 or (_v_res - _v_alloc) > 800.0:
+                        torch.cuda.empty_cache()
+
                 if step >= (initial_step + eval_window_steps):
                     # Check for live dynamic control directive
                     new_lane = None
@@ -506,9 +531,24 @@ class AdaptiveLaneRunner:
                             directive_file.unlink(missing_ok=True)
                             action = dir_data.get("action", "")
                             target_lane = dir_data.get("target_lane", "")
-                            if action == "force_lane" and target_lane in self.lanes:
-                                new_lane = self.lanes[target_lane]
-                                trans_reason = f"External directive: forced switch to {target_lane}"
+                            vram_alloc = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0.0
+
+                            if action == "force_lane":
+                                if target_lane not in self.lanes:
+                                    self._log_event("directive_rejected", {
+                                        "action": action,
+                                        "target_lane": target_lane,
+                                        "reason": f"Target lane '{target_lane}' is invalid for preset '{model_preset}'",
+                                    })
+                                elif vram_alloc > 5500.0 and target_lane != "safe_seq256":
+                                    self._log_event("directive_rejected", {
+                                        "action": action,
+                                        "target_lane": target_lane,
+                                        "reason": f"Rejected by LocalPolicyEngine: High VRAM pressure ({vram_alloc:.0f} MB > 5500 MB ceiling)",
+                                    })
+                                else:
+                                    new_lane = self.lanes[target_lane]
+                                    trans_reason = f"External directive validated: forced switch to {target_lane}"
                             elif action == "promote":
                                 if self.current_lane.name == "safe_seq256" and "fast_seq256_zero0_gacc4" in self.lanes:
                                     new_lane = self.lanes["fast_seq256_zero0_gacc4"]
@@ -556,6 +596,7 @@ class AdaptiveLaneRunner:
                             torch.cuda.empty_cache()
                             import gc
                             gc.collect()
+                        print(f"\n>>> [LANE GOVERNOR] Step {step:,}: {old_lane_name} -> {new_lane.name} (Batch Size: {new_lane.batch_size}) | {trans_reason}\n", flush=True)
                         self._log_event("lane_switched", {
                             "from_lane": old_lane_name,
                             "to_lane": new_lane.name,
@@ -585,7 +626,7 @@ class AdaptiveLaneRunner:
 
             if step % checkpoint_interval == 0:
                 try:
-                    self.checkpoint_manager.save_live_checkpoint(
+                    ckpt_res = self.checkpoint_manager.save_live_checkpoint(
                         model=model,
                         optimizer=optimizer,
                         metadata={
@@ -597,8 +638,10 @@ class AdaptiveLaneRunner:
                         },
                         label="v89",
                     )
-                except Exception:
-                    pass
+                    slot_name = ckpt_res.name if hasattr(ckpt_res, "name") else str(ckpt_res)
+                    print(f"\n>>> [CHECKPOINT SAVED] Step {step:,} -> {slot_name} (SHA256 verified) | Tokens: {total_tokens_processed:,}\n", flush=True)
+                except Exception as e:
+                    print(f"\n>>> [CHECKPOINT WARNING] Step {step:,} failed to save: {e}\n", flush=True)
 
         return {
             "steps_completed": step,
