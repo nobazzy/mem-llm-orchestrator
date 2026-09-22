@@ -596,6 +596,7 @@ class AdaptiveLaneRunner:
                             torch.cuda.empty_cache()
                             import gc
                             gc.collect()
+                        print(f"\n>>> [LANE GOVERNOR] Step {step:,}: {old_lane_name} -> {new_lane.name} (Batch Size: {new_lane.batch_size}) | {trans_reason}\n", flush=True)
                         self._log_event("lane_switched", {
                             "from_lane": old_lane_name,
                             "to_lane": new_lane.name,
@@ -625,7 +626,7 @@ class AdaptiveLaneRunner:
 
             if step % checkpoint_interval == 0:
                 try:
-                    self.checkpoint_manager.save_live_checkpoint(
+                    ckpt_res = self.checkpoint_manager.save_live_checkpoint(
                         model=model,
                         optimizer=optimizer,
                         metadata={
@@ -637,8 +638,10 @@ class AdaptiveLaneRunner:
                         },
                         label="v89",
                     )
-                except Exception:
-                    pass
+                    slot_name = ckpt_res.name if hasattr(ckpt_res, "name") else str(ckpt_res)
+                    print(f"\n>>> [CHECKPOINT SAVED] Step {step:,} -> {slot_name} (SHA256 verified) | Tokens: {total_tokens_processed:,}\n", flush=True)
+                except Exception as e:
+                    print(f"\n>>> [CHECKPOINT WARNING] Step {step:,} failed to save: {e}\n", flush=True)
 
         return {
             "steps_completed": step,
