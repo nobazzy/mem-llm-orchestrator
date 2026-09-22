@@ -69,6 +69,10 @@ def main():
     parser.add_argument("--fallback-dataset", default="roneneldan/TinyStories", help="Fallback dataset if network drops")
     parser.add_argument("--start-lane", default="aggressive_seq256_zero0_gacc4", help="Initial operating lane")
     parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between atomic checkpoints (default: 1000)")
+    parser.add_argument("--val-interval", type=int, default=500, help="Steps between validation evaluations (default: 500)")
+    parser.add_argument("--val-steps", type=int, default=10, help="Number of batches per validation evaluation (default: 10)")
+    parser.add_argument("--val-dataset", default=None, help="Validation dataset name (default: auto)")
+    parser.add_argument("--val-split", default="validation", help="Validation dataset split (default: validation)")
     parser.add_argument("--eval-window", type=int, default=25, help="Steps between telemetry prints (default: 25)")
     parser.add_argument("--resume-checkpoint", default=None, help="Explicit checkpoint path")
     parser.add_argument("--resume-latest", action="store_true", help="Auto-resume from latest checkpoint in checkpoints/")
@@ -108,6 +112,7 @@ def main():
     print(f"  Dataset Streaming:   {args.dataset} [Cache: {args.cache_mode.upper()} - 100% Fresh Tokens]", flush=True)
     print(f"  Target Global Steps: {args.steps:,} steps", flush=True)
     print(f"  Checkpoint Cadence:  Every {args.checkpoint_interval:,} steps (Atomic SHA256 verified)", flush=True)
+    print(f"  Validation Tracking: Every {args.val_interval:,} steps (Split: {args.val_split})", flush=True)
     print(f"  Resume Status:       {'Starting fresh from step 0' if (not resume_target or args.clean) else resume_target}", flush=True)
     print(f"  Zero-OOM Governance: Active (Autonomous lane switching + headroom monitoring)", flush=True)
     print("="*84 + "\n", flush=True)
@@ -161,7 +166,8 @@ def main():
             lane_badge = f"{GREEN}[{lane_raw}]{RESET}"
 
         pct_done = (step / args.steps) * 100.0
-        print(f"Step {step:06d}/{args.steps:06d} ({pct_done:5.2f}%) | Loss: {loss:.4f} (avg: {avg_loss:.4f}) | Speed: {tok_sec:6.0f} tok/s ({step_rate:4.1f} st/s) | VRAM: {vram_alloc:4.0f}MB ({vram_pct:4.1f}%) | Lane: {lane_badge} | ETA: {eta_str}", flush=True)
+        val_str = f" | {CYAN}Val: {r.latest_val_loss:.4f}{RESET}" if getattr(r, "latest_val_loss", None) is not None else ""
+        print(f"Step {step:06d}/{args.steps:06d} ({pct_done:5.2f}%) | Loss: {loss:.4f} (avg: {avg_loss:.4f}){val_str} | Speed: {tok_sec:6.0f} tok/s ({step_rate:4.1f} st/s) | VRAM: {vram_alloc:4.0f}MB ({vram_pct:4.1f}%) | Lane: {lane_badge} | ETA: {eta_str}", flush=True)
 
     try:
         result = runner.train_loop(
@@ -174,6 +180,10 @@ def main():
             eval_window_steps=args.eval_window,
             resume_from_checkpoint=resume_target,
             step_callback=terminal_telemetry_hook,
+            val_interval=args.val_interval,
+            val_steps=args.val_steps,
+            val_dataset_name=args.val_dataset,
+            val_split=args.val_split,
         )
     except KeyboardInterrupt:
         print("\n" + "!"*84, flush=True)
