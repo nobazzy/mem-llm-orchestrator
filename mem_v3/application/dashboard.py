@@ -643,6 +643,9 @@ def run_dashboard(port: int = 8080) -> None:
         print("\nEncerrando dashboard.")
 
 
+run_dashboard_server = run_dashboard
+
+
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8080
     run_dashboard(port)
