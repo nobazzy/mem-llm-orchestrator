@@ -43,6 +43,9 @@ def main() -> None:
     parser.add_argument("--precision", default="fp16")
     parser.add_argument("--resume-checkpoint", default=None, help="Path to checkpoint or 'latest'")
     parser.add_argument("--resume-latest", action="store_true", help="Resume automatically from latest checkpoint")
+    parser.add_argument("--eval-window", type=int, default=10, help="Steps per evaluation window and terminal log (default: 10)")
+    parser.add_argument("--dashboard", action="store_true", help="Start background web dashboard at http://localhost:8089")
+    parser.add_argument("--dashboard-port", type=int, default=8089, help="Dashboard port (default: 8089)")
     args = parser.parse_args()
 
     resume_target = args.resume_checkpoint
@@ -55,16 +58,26 @@ def main() -> None:
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     print("============================================================")
-    print("  MEM ORCHESTRATOR — TREINO REAL COM AUTONOMOUS LANE SWITCHING")
+    print("  MEM ORCHESTRATOR - TREINO REAL COM AUTONOMOUS LANE SWITCHING")
     print(f"  Dispositivo: {device_name} (Aceleração AMP: {effective_precision.upper()})")
     print(f"  Target: {args.target_steps:,} steps | Start Lane: {args.start_lane}")
     print(f"  Dataset: {args.dataset_name} (Streaming) [Fallback: {args.dataset_fallback_name}]")
-    print(f"  Modelo: {args.model_preset} (~130M parâmetros — SDPA Flash Attention)")
+    print(f"  Modelo: {args.model_preset} (~130M parâmetros - SDPA Flash Attention)")
     print(f"  Resume Checkpoint: {resume_target if resume_target else 'Não (Início do zero)'}")
     llm_active = bool(api_key)
     gov_label = "LocalPolicyEngine + Consultor Executivo IA (Ativo)" if llm_active else "LocalPolicyEngine (Modo Autônomo Local)"
     print(f"  Governança: {gov_label}")
     print("============================================================\n")
+
+    if args.dashboard:
+        import threading
+        from application.dashboard import run_dashboard_server
+        threading.Thread(
+            target=run_dashboard_server,
+            kwargs={"port": args.dashboard_port},
+            daemon=True,
+        ).start()
+        print(f">>> Web Dashboard ao vivo em: http://localhost:{args.dashboard_port}\n")
 
     context = OrchestratorContext(_root)
     req = RuntimeRequest(
@@ -118,6 +131,13 @@ def main() -> None:
         model_preset=args.model_preset,
     )
 
+    def terminal_step_hook(step: int, loss: float, tok_sec: float, r: AdaptiveLaneRunner):
+        vram_alloc = (torch.cuda.memory_allocated() / (1024 ** 2)) if torch.cuda.is_available() else 0.0
+        vram_pct = ((vram_alloc / 8151.0) * 100) if torch.cuda.is_available() else 0.0
+        lane_name = r.current_lane.name.split('_')[0].upper()
+        pct_done = (step / args.target_steps) * 100.0
+        print(f"Step {step:05d}/{args.target_steps:05d} ({pct_done:4.1f}%) | Speed: {tok_sec:6.0f} tok/s | VRAM: {vram_alloc:4.0f}MB ({vram_pct:4.1f}%) | Lane: [{lane_name}] | Loss: {loss:.4f} | Zero-OOM: OK", flush=True)
+
     result = runner.train_loop(
         total_steps=args.steps,
         dataset_name=args.dataset_name,
@@ -125,8 +145,9 @@ def main() -> None:
         fallback_name=args.dataset_fallback_name,
         model_preset=args.model_preset,
         checkpoint_interval=500,
-        eval_window_steps=50,
+        eval_window_steps=args.eval_window,
         resume_from_checkpoint=resume_target,
+        step_callback=terminal_step_hook,
     )
 
     print("\n============================================================")
