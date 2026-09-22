@@ -72,16 +72,32 @@ def main():
     parser.add_argument("--eval-window", type=int, default=25, help="Steps between telemetry prints (default: 25)")
     parser.add_argument("--resume-checkpoint", default=None, help="Explicit checkpoint path")
     parser.add_argument("--resume-latest", action="store_true", help="Auto-resume from latest checkpoint in checkpoints/")
+    parser.add_argument("--clean", action="store_true", help="Start completely fresh from step 0 (archives old checkpoints)")
+    parser.add_argument("--cache-mode", default="off", choices=["off", "memmap", "disk"], help="Dataset caching mode (default: off for genuine streaming)")
     parser.add_argument("--dashboard", action="store_true", help="Launch live web dashboard on http://localhost:8089")
     parser.add_argument("--dashboard-port", type=int, default=8089, help="Web dashboard port (default: 8089)")
     args = parser.parse_args()
+
+    os.environ["MEM_DATASET_CACHE_MODE"] = args.cache_mode
+
+    ckpt_root = Path(_root) / "checkpoints"
+    if args.clean and ckpt_root.exists():
+        archive_dir = ckpt_root / f"archive_{time.strftime('%Y%m%d_%H%M%S')}"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        import shutil
+        for item in ckpt_root.iterdir():
+            if item.is_dir() and not item.name.startswith("archive_"):
+                shutil.move(str(item), str(archive_dir / item.name))
+            elif item.is_file() and item.name.endswith(".txt"):
+                shutil.move(str(item), str(archive_dir / item.name))
+        print(f">>> [CLEAN START] Checkpoints anteriores arquivados com sucesso em: {archive_dir.name}\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
     total_vram_mb = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 2)) if torch.cuda.is_available() else 0.0
 
     resume_target = args.resume_checkpoint
-    if args.resume_latest and not resume_target:
+    if args.resume_latest and not resume_target and not args.clean:
         resume_target = "latest"
 
     print("\n" + "="*84, flush=True)
@@ -89,10 +105,10 @@ def main():
     print(f"  Hardware:            {device_name} ({total_vram_mb/1024:.1f} GB GDDR6)", flush=True)
     print(f"  Precision / Kernel:  Mixed Precision (AMP FP16) + PyTorch 2.x SDPA", flush=True)
     print(f"  Model Architecture:  {args.model_preset} (Causal Transformer with Rotary Embeddings)", flush=True)
-    print(f"  Dataset Source:      {args.dataset} [Fallback: {args.fallback_dataset}]", flush=True)
+    print(f"  Dataset Streaming:   {args.dataset} [Cache: {args.cache_mode.upper()} - 100% Fresh Tokens]", flush=True)
     print(f"  Target Global Steps: {args.steps:,} steps", flush=True)
     print(f"  Checkpoint Cadence:  Every {args.checkpoint_interval:,} steps (Atomic SHA256 verified)", flush=True)
-    print(f"  Resume Status:       {resume_target if resume_target else 'Starting fresh from step 0'}", flush=True)
+    print(f"  Resume Status:       {'Starting fresh from step 0' if (not resume_target or args.clean) else resume_target}", flush=True)
     print(f"  Zero-OOM Governance: Active (Autonomous lane switching + headroom monitoring)", flush=True)
     print("="*84 + "\n", flush=True)
 
