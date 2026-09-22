@@ -47,3 +47,5 @@ htmlcov/
 *.log
 *.zip
 *.tar.gz
+
+evidence_packets/
