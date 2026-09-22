@@ -3,6 +3,7 @@ param(
     [string]$model = 'large_130m',
     [int]$eval_window = 25,
     [switch]$resume,
+    [switch]$clean,
     [switch]$dashboard
 )
 $ErrorActionPreference = 'Stop'
@@ -27,7 +28,9 @@ Write-Host "  Modelo:    $model" -ForegroundColor Gray
 Write-Host "========================================================================`n" -ForegroundColor Cyan
 
 $extraArgs = @("--steps", $steps, "--model-preset", $model, "--eval-window", $eval_window, "--checkpoint-interval", 1000)
-if ($resume) {
+if ($clean) {
+    $extraArgs += "--clean"
+} elseif ($resume) {
     $extraArgs += "--resume-latest"
 }
 if ($dashboard) {
