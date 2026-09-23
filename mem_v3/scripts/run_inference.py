@@ -50,9 +50,16 @@ def sample_generate(
     temperature: float = 0.8,
     top_k: int = 40,
     repetition_penalty: float = 1.0,
+    tokenizer: Any = None,
+    stream: bool = True,
 ) -> torch.Tensor:
     model.eval()
     curr_ids = prompt_ids
+    if stream and tokenizer is not None and prompt_ids.size(1) > 0:
+        p_str = tokenizer.decode(prompt_ids[0].tolist(), skip_special_tokens=True)
+        if p_str:
+            print(p_str, end="", flush=True)
+
     for _ in range(max_new_tokens):
         seq_limit = getattr(model, "seq_len", 256)
         cond = curr_ids if curr_ids.size(1) <= seq_limit else curr_ids[:, -seq_limit:]
@@ -74,6 +81,16 @@ def sample_generate(
         probs = F.softmax(logits, dim=-1)
         next_tok = torch.multinomial(probs, num_samples=1)
         curr_ids = torch.cat([curr_ids, next_tok], dim=1)
+
+        if stream and tokenizer is not None:
+            tok_text = tokenizer.decode(next_tok[0].tolist(), skip_special_tokens=True)
+            try:
+                print(tok_text, end="", flush=True)
+            except Exception:
+                safe = tok_text.encode("ascii", errors="replace").decode("ascii")
+                print(safe, end="", flush=True)
+    if stream:
+        print()
     return curr_ids
 
 
@@ -139,13 +156,9 @@ def main():
         temperature=args.temperature,
         top_k=args.top_k,
         repetition_penalty=args.repetition_penalty,
+        tokenizer=tokenizer,
+        stream=True,
     )
-    generated_text = tokenizer.decode(out_ids[0].tolist(), skip_special_tokens=True)
-    try:
-        print(generated_text)
-    except Exception:
-        safe_str = generated_text.encode("ascii", errors="replace").decode("ascii")
-        print(safe_str)
     print("-"*70 + "\n")
 
 
