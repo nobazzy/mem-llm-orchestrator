@@ -55,10 +55,21 @@ def sample_generate(
 ) -> torch.Tensor:
     model.eval()
     curr_ids = prompt_ids
+    prev_len = 0
     if stream and tokenizer is not None and prompt_ids.size(1) > 0:
         p_str = tokenizer.decode(prompt_ids[0].tolist(), skip_special_tokens=True)
         if p_str:
-            print(p_str, end="", flush=True)
+            clean_p = (
+                p_str.replace("\u2018", "'")
+                .replace("\u2019", "'")
+                .replace("\u201c", '"')
+                .replace("\u201d", '"')
+                .replace("\u2014", "--")
+                .replace("\u2013", "-")
+                .replace("\u2026", "...")
+            )
+            print(clean_p, end="", flush=True)
+            prev_len = len(p_str)
 
     for _ in range(max_new_tokens):
         seq_limit = getattr(model, "seq_len", 256)
@@ -83,13 +94,38 @@ def sample_generate(
         curr_ids = torch.cat([curr_ids, next_tok], dim=1)
 
         if stream and tokenizer is not None:
-            tok_text = tokenizer.decode(next_tok[0].tolist(), skip_special_tokens=True)
-            try:
-                print(tok_text, end="", flush=True)
-            except Exception:
-                safe = tok_text.encode("ascii", errors="replace").decode("ascii")
-                print(safe, end="", flush=True)
+            full_text = tokenizer.decode(curr_ids[0].tolist(), skip_special_tokens=True)
+            diff = full_text[prev_len:]
+            if diff and "\ufffd" not in diff:
+                clean_diff = (
+                    diff.replace("\u2018", "'")
+                    .replace("\u2019", "'")
+                    .replace("\u201c", '"')
+                    .replace("\u201d", '"')
+                    .replace("\u2014", "--")
+                    .replace("\u2013", "-")
+                    .replace("\u2026", "...")
+                )
+                try:
+                    print(clean_diff, end="", flush=True)
+                except Exception:
+                    safe = clean_diff.encode("ascii", errors="replace").decode("ascii")
+                    print(safe, end="", flush=True)
+                prev_len = len(full_text)
     if stream:
+        # Flush any remaining tokens at the end
+        if tokenizer is not None and prev_len < len(full_text):
+            final_diff = full_text[prev_len:]
+            clean_final = (
+                final_diff.replace("\u2018", "'")
+                .replace("\u2019", "'")
+                .replace("\u201c", '"')
+                .replace("\u201d", '"')
+                .replace("\u2014", "--")
+                .replace("\u2013", "-")
+                .replace("\u2026", "...")
+            )
+            print(clean_final, end="", flush=True)
         print()
     return curr_ids
 
@@ -102,6 +138,7 @@ def main():
     parser.add_argument("--max-tokens", type=int, default=60, help="Number of new tokens to generate")
     parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
     parser.add_argument("--top-k", type=int, default=40, help="Top-K sampling cutoff")
+    parser.add_argument("--seq-len", type=int, default=None, help="Sequence length (default: auto-detected from checkpoint metadata, fallback: 256)")
     parser.add_argument("--repetition-penalty", type=float, default=1.2, help="Penalty applied to repeated tokens (default: 1.2)")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"], help="Device for inference (default: cpu to avoid VRAM contention with live training)")
     args = parser.parse_args()
@@ -132,11 +169,14 @@ def main():
     meta = payload.get("metadata", {})
     step = meta.get("step", "unknown")
     loss = meta.get("loss", "unknown")
-    print(f"Checkpoint info: Step {step} | Loss: {loss}\n")
+    lane = meta.get("lane", "")
+    detected_seq_len = 512 if "512" in lane else 256
+    seq_len = args.seq_len if args.seq_len is not None else detected_seq_len
+    print(f"Checkpoint info: Step {step} | Loss: {loss} | Context Window: {seq_len} tokens\n")
 
     model = build_tiny_causal_lm(
         vocab_size=len(tokenizer),
-        seq_len=256,
+        seq_len=seq_len,
         preset=args.model_preset,
     ).to(device)
 
