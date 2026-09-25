@@ -7,19 +7,28 @@
 [![Validation](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps%20Zero--OOM-brightgreen)](mem_v3/EVALUATION.md)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20DDD-blue)](#system-architecture)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](mem_v3/LICENSE)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nobazzy/mem-llm-orchestrator/blob/main/notebooks/mem_orchestrator_interactive_demo.ipynb)
 
-> Autonomous, zero-OOM orchestration engine for sustained Large Language Model pre-training and fine-tuning with deterministic policy enforcement.
-
----
-
-### Project Status & Platform Support
-* **High-Performance Production:** Linux / WSL2 (Ubuntu 22.04+) with NVIDIA GPUs (RTX 30xx/40xx/50xx / Data Center GPUs).
-* **Portable Compatibility:** Windows, Linux, and macOS (for testing, governance, development, and native PyTorch execution).
-* **Guiding Principle:** *AI proposes. Local policy decides. Runtime executes. Feedback improves.*
+> **Autonomous, Zero-OOM Orchestration Engine** for Large Language Model pre-training and fine-tuning with dynamic lane switching, deterministic policy enforcement, and live web telemetry.
 
 ---
 
-## Overview
+### ⚡ Try in Your Browser (1-Click Google Colab Demo)
+Experience the autonomous **Adaptive Lane Runner** and **Zero-OOM Chaos Defense** live on a free cloud GPU without installing anything on your machine:
+👉 **[Open Interactive Demo in Google Colab](https://colab.research.google.com/github/nobazzy/mem-llm-orchestrator/blob/main/notebooks/mem_orchestrator_interactive_demo.ipynb)**
+
+---
+
+### 🚀 1-Click Local Quickstart
+Run the autonomous demo with live hardware discovery and automatic web dashboard on your machine:
+```bash
+git clone https://github.com/nobazzy/mem-llm-orchestrator.git
+cd mem-llm-orchestrator/mem_v3
+python run_demo.py
+```
+* Automatically detects your GPU (or fallback CPU), calibrates throughput lanes, and launches the live telemetry dashboard at `http://localhost:8089`.
+
+---
 
 Large-scale LLM training frequently suffers from catastrophic failures: sudden CUDA Out-of-Memory (OOM) errors, gradient explosions (NaN/Inf), silent hardware throttling, and corrupted checkpoints that discard hours of compute.
 
