@@ -1,6 +1,24 @@
 # ⚡ MEM v3 — Guia Técnico e Manual Operacional
 
-> **Guia completo de arquitetura, configuração de ambiente (WSL2/Linux e Multiplataforma), execução do orquestrador e políticas de segurança.**
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/nobazzy/mem-llm-orchestrator/blob/main/notebooks/mem_orchestrator_interactive_demo.ipynb)
+
+> **Motor autônomo de orquestração de LLMs com troca dinâmica de faixas (Adaptive Lane Runner), proteção Zero-OOM, checkpoints atômicos e telemetria em tempo real.**
+
+---
+
+### ⚡ Teste no Navegador (Demo 1-Click no Google Colab)
+Experimente o orquestrador ao vivo em uma GPU na nuvem gratuita sem instalar nada:
+👉 **[Abrir Demonstração Interativa no Google Colab](https://colab.research.google.com/github/nobazzy/mem-llm-orchestrator/blob/main/notebooks/mem_orchestrator_interactive_demo.ipynb)**
+
+---
+
+### 🚀 Teste Local em 1 Clique (Windows / Linux / macOS)
+```bash
+git clone https://github.com/nobazzy/mem-llm-orchestrator.git
+cd mem-llm-orchestrator/mem_v3
+python run_demo.py
+```
+* O script detecta automaticamente a GPU/CPU, calibra as faixas de VRAM e abre o Dashboard em `http://localhost:8089`.
 
 ---
 

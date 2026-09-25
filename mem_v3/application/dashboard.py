@@ -665,12 +665,34 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
 
-def run_dashboard(port: int = 8080) -> None:
-    server = ThreadingHTTPServer(("0.0.0.0", port), DashboardRequestHandler)
-    print(f"============================================================")
-    print(f"  MEM ORCHESTRATOR LIVE DASHBOARD")
-    print(f"  Painel ativo em: http://localhost:{port}")
-    print(f"============================================================")
+def run_dashboard(port: int = 8089) -> None:
+    candidate_ports = [port, 8089, 8080, 8888, 5000, 3000, 9000]
+    candidate_hosts = ["127.0.0.1", "localhost", "0.0.0.0"]
+    server = None
+    active_port = port
+    active_host = "127.0.0.1"
+
+    for h in candidate_hosts:
+        for p in candidate_ports:
+            try:
+                server = ThreadingHTTPServer((h, p), DashboardRequestHandler)
+                active_port = p
+                active_host = h
+                break
+            except Exception:
+                continue
+        if server is not None:
+            break
+
+    if server is None:
+        print("[ERRO] Não foi possível vincular o servidor HTTP a nenhuma porta disponível.")
+        return
+
+    print("============================================================")
+    print("  MEM ORCHESTRATOR LIVE DASHBOARD")
+    print(f"  Painel ativo em: http://localhost:{active_port}")
+    print(f"  Host: {active_host} | Porta: {active_port}")
+    print("============================================================")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -681,5 +703,5 @@ run_dashboard_server = run_dashboard
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8080
+    port = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 8089
     run_dashboard(port)

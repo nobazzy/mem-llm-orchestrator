@@ -393,13 +393,13 @@ class CheckpointManager:
             mode="post_train_validated_model_optimizer_state",
         )
 
-    def latest_checkpoint_path(self, label: str = "v89") -> Optional[str]:
-        # Try requested label first, then generic v89 fallback.
-        # This fixes runner labels like v89_slimpajama_75m_... while
-        # checkpoints are published as v89_live_00/01/02.
+    def latest_checkpoint_path(self, label: Optional[str] = None) -> Optional[str]:
+        # Search specified label first, or discover latest among v90, v89, etc.
         labels = []
-        for candidate_label in (label, "v89"):
-            if candidate_label and candidate_label not in labels:
+        if label:
+            labels.append(label)
+        for candidate_label in ("v90", "v89"):
+            if candidate_label not in labels:
                 labels.append(candidate_label)
 
         for candidate_label in labels:
