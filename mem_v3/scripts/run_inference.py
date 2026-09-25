@@ -170,17 +170,31 @@ def main():
     step = meta.get("step", "unknown")
     loss = meta.get("loss", "unknown")
     lane = meta.get("lane", "")
+    model_state = payload.get("model_state_dict", {})
+    detected_preset = args.model_preset
+    if "token_embedding.weight" in model_state:
+        d_model = model_state["token_embedding.weight"].shape[1]
+        num_layers = len([k for k in model_state.keys() if k.endswith(".ln1.weight")])
+        if d_model == 640 and num_layers == 8:
+            detected_preset = "medium_75m"
+        elif d_model == 768 and num_layers == 8:
+            detected_preset = "medium_100m"
+        elif d_model == 768 and num_layers == 12:
+            detected_preset = "large_130m"
+        elif d_model == 1024 and num_layers == 16:
+            detected_preset = "xlarge_250m"
+
     detected_seq_len = 512 if "512" in lane else 256
     seq_len = args.seq_len if args.seq_len is not None else detected_seq_len
-    print(f"Checkpoint info: Step {step} | Loss: {loss} | Context Window: {seq_len} tokens\n")
+    print(f"Checkpoint info: Step {step} | Loss: {loss} | Architecture: {detected_preset} | Context Window: {seq_len} tokens\n")
 
     model = build_tiny_causal_lm(
         vocab_size=len(tokenizer),
         seq_len=seq_len,
-        preset=args.model_preset,
+        preset=detected_preset,
     ).to(device)
 
-    model.load_state_dict(payload["model_state_dict"])
+    model.load_state_dict(model_state)
     model.eval()
 
     encoded = tokenizer.encode(args.prompt) if args.prompt else []
