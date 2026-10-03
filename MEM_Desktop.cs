@@ -20,9 +20,9 @@ namespace MemOrchestrator
             if (string.IsNullOrEmpty(pythonExe) || !File.Exists(pythonExe))
             {
                 MessageBox.Show(
-                    "O ambiente virtual Python nao foi encontrado.\n\n" +
-                    "Certifique-se de que a pasta 'mem_v3\\.venv' existe com o Python configurado.",
-                    "MEM LLM Orchestrator - Erro de Inicializacao",
+                    "Python virtual environment was not found.\n\n" +
+                    "Please ensure the 'mem_v3\\.venv' directory exists with PyTorch installed.",
+                    "MEM Orchestrator - Initialization Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
@@ -34,8 +34,8 @@ namespace MemOrchestrator
             if (!File.Exists(launcherScript))
             {
                 MessageBox.Show(
-                    "O script inicializador 'MEM_Launcher.py' nao foi localizado.",
-                    "MEM LLM Orchestrator - Erro",
+                    "The initialization script 'MEM_Launcher.py' was not found in the application directory.",
+                    "MEM Orchestrator - Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
@@ -43,8 +43,6 @@ namespace MemOrchestrator
             }
 
             // 3. Start Python Background Process
-            // MEM_Launcher.py handles starting the HTTP server, verifying connection,
-            // launching the isolated desktop browser window, and waiting for user close.
             ProcessStartInfo pyInfo = new ProcessStartInfo();
             pyInfo.FileName = pythonExe;
             pyInfo.Arguments = "\"" + launcherScript + "\"";
@@ -66,8 +64,8 @@ namespace MemOrchestrator
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    "Falha ao executar o inicializador:\n" + ex.Message,
-                    "MEM LLM Orchestrator - Erro",
+                    "Failed to launch the engine:\n" + ex.Message,
+                    "MEM Orchestrator - Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );

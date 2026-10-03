@@ -1,6 +1,7 @@
 """
-MEM ORCHESTRATOR - Desktop Application Launcher.
-Starts the Control Center server and launches the UI in native desktop window mode.
+MEM ORCHESTRATOR - Production Desktop Application Launcher.
+Initializes the Production Control Center and launches the UI in native desktop window mode.
+100% in English.
 """
 
 from __future__ import annotations
@@ -51,43 +52,43 @@ def find_browser() -> str | None:
 
 
 def main():
-    print("=" * 60)
-    print("  MEM LLM ORCHESTRATOR - CONTROL CENTER DESKTOP")
-    print("=" * 60)
+    print("=" * 66)
+    print("  MEM ORCHESTRATOR - PRODUCTION LLM TRAINING STUDIO")
+    print("=" * 66)
 
     from mem_v3.application.control_center import run_control_center, session
 
     actual_port = run_control_center(PORT)
     app_url = f"http://127.0.0.1:{actual_port}"
-    print(f"[*] Inicializando servidor backend em {app_url}...")
+    print(f"[*] Initializing backend engine at {app_url}...")
 
-    # Wait for the HTTP server to answer before opening the browser window
+    # Wait for the HTTP server to respond before opening the browser window
     if not wait_for_server(actual_port, timeout=15.0):
-        print(f"[ERRO] O servidor backend nao respondeu na porta {actual_port}.")
+        print(f"[ERROR] Backend engine failed to respond on port {actual_port}.")
         sys.exit(1)
 
-    print("[*] Servidor backend pronto e respondendo.")
+    print("[*] Backend engine online and accepting requests.")
 
     # Open the UI in desktop app mode or standard browser
     browser_exe = find_browser()
     if browser_exe:
-        print(f"[*] Abrindo janela dedicada via: {os.path.basename(browser_exe)}")
+        print(f"[*] Opening dedicated desktop window via: {os.path.basename(browser_exe)}")
         cmd = [
             browser_exe,
             f"--app={app_url}",
-            "--window-size=1366,860",
+            "--window-size=1400,900",
         ]
         try:
             subprocess.Popen(cmd)
         except Exception as e:
-            print(f"[AVISO] Falha ao abrir via {browser_exe}: {e}. Abrindo padrao...")
+            print(f"[WARNING] Failed to open via {browser_exe}: {e}. Opening default browser...")
             webbrowser.open(app_url)
     else:
-        print("[*] Abrindo navegador padrao...")
+        print("[*] Opening default web browser...")
         webbrowser.open(app_url)
 
-    print(f"[*] Painel de controle em execucao: {app_url}")
-    print("[*] Pressione Ctrl+C para encerrar ou use o botao 'Fechar Servidor' na interface.")
+    print(f"[*] Control Center running at: {app_url}")
+    print("[*] Press Ctrl+C in terminal or click 'Shutdown Engine' in the GUI to terminate.")
 
     # Main watchdog loop: keeps server alive and detects when user closes window
     try:
@@ -97,10 +98,10 @@ def main():
             if session.has_ever_connected():
                 idle_seconds = time.time() - session.get_last_activity()
                 if idle_seconds > 25.0:
-                    print("[*] Inatividade detectada (janela fechada). Encerrando servidor...")
+                    print("[*] Inactivity detected (window closed). Terminating engine...")
                     break
     except KeyboardInterrupt:
-        print("[*] Encerrado pelo usuario.")
+        print("[*] Halted by user.")
 
     # Clean termination
     os._exit(0)
