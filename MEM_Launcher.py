@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-import tempfile
 import subprocess
 import urllib.request
 import webbrowser
@@ -56,7 +55,7 @@ def main():
     print("  MEM LLM ORCHESTRATOR - CONTROL CENTER DESKTOP")
     print("=" * 60)
 
-    from mem_v3.application.control_center import run_control_center
+    from mem_v3.application.control_center import run_control_center, session
 
     actual_port = run_control_center(PORT)
     app_url = f"http://127.0.0.1:{actual_port}"
@@ -69,38 +68,42 @@ def main():
 
     print("[*] Servidor backend pronto e respondendo.")
 
+    # Open the UI in desktop app mode or standard browser
     browser_exe = find_browser()
     if browser_exe:
-        print(f"[*] Abrindo janela de aplicativo via {os.path.basename(browser_exe)}...")
-        # Use an isolated user-data-dir so Edge/Chrome runs as a standalone desktop process
-        profile_dir = Path(tempfile.gettempdir()) / "mem_orchestrator_profile"
-        profile_dir.mkdir(parents=True, exist_ok=True)
-
+        print(f"[*] Abrindo janela dedicada via: {os.path.basename(browser_exe)}")
         cmd = [
             browser_exe,
             f"--app={app_url}",
-            f"--user-data-dir={profile_dir}",
             "--window-size=1366,860",
-            "--disable-extensions",
-            "--disable-plugins",
-            "--no-first-run",
-            "--no-default-browser-check",
         ]
-
-        proc = subprocess.Popen(cmd)
         try:
-            proc.wait()
-            print("[*] Janela da aplicacao encerrada pelo usuario.")
-        except KeyboardInterrupt:
-            proc.terminate()
+            subprocess.Popen(cmd)
+        except Exception as e:
+            print(f"[AVISO] Falha ao abrir via {browser_exe}: {e}. Abrindo padrao...")
+            webbrowser.open(app_url)
     else:
         print("[*] Abrindo navegador padrao...")
         webbrowser.open(app_url)
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+
+    print(f"[*] Painel de controle em execucao: {app_url}")
+    print("[*] Pressione Ctrl+C para encerrar ou use o botao 'Fechar Servidor' na interface.")
+
+    # Main watchdog loop: keeps server alive and detects when user closes window
+    try:
+        while True:
+            time.sleep(2)
+            # If client opened the dashboard and then closed all windows
+            if session.has_ever_connected():
+                idle_seconds = time.time() - session.get_last_activity()
+                if idle_seconds > 25.0:
+                    print("[*] Inatividade detectada (janela fechada). Encerrando servidor...")
+                    break
+    except KeyboardInterrupt:
+        print("[*] Encerrado pelo usuario.")
+
+    # Clean termination
+    os._exit(0)
 
 
 if __name__ == "__main__":

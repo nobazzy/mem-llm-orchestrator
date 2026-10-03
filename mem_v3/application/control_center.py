@@ -50,6 +50,21 @@ class OrchestratorSession:
         self.logs: List[str] = []
         self.last_result: Dict[str, Any] = {}
         self.active_config: Dict[str, Any] = {}
+        self.last_activity_time = time.time()
+        self.ever_connected = False
+
+    def record_activity(self):
+        with self.lock:
+            self.last_activity_time = time.time()
+            self.ever_connected = True
+
+    def get_last_activity(self) -> float:
+        with self.lock:
+            return self.last_activity_time
+
+    def has_ever_connected(self) -> bool:
+        with self.lock:
+            return self.ever_connected
 
     def log(self, message: str):
         with self.lock:
@@ -383,9 +398,14 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class="brand-subtitle">Autonomous Adaptive GPU Orchestration & Zero-OOM Defense</div>
       </div>
     </div>
-    <div id="hw-badge" class="hw-badge">
-      <div class="hw-dot"></div>
-      <span id="hw-text">Detectando Hardware...</span>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div id="hw-badge" class="hw-badge">
+        <div class="hw-dot"></div>
+        <span id="hw-text">Detectando Hardware...</span>
+      </div>
+      <button class="btn btn-secondary" onclick="shutdownApp()" style="padding: 6px 14px; font-size: 12px; border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
+        Fechar Servidor
+      </button>
     </div>
   </header>
 
@@ -751,6 +771,22 @@ HTML_PAGE = """<!DOCTYPE html>
       document.getElementById('console-logs').textContent = '';
     }
 
+    async function shutdownApp() {
+      if (confirm('Deseja realmente encerrar o MEM Orchestrator e desligar o servidor em segundo plano?')) {
+        try {
+          await fetch('/api/shutdown', { method: 'POST' });
+        } catch (e) {}
+        document.body.innerHTML = `
+          <div style="display: flex; height: 100vh; align-items: center; justify-content: center; flex-direction: column; gap: 16px; background: #0b0f19; color: #94a3b8; font-family: sans-serif; text-align: center;">
+            <h2 style="color: #f1f5f9; font-size: 22px;">Servidor Finalizado</h2>
+            <p>Os processos locais e a alocação de memória foram liberados com sucesso.</p>
+            <p style="font-size: 13px; color: #64748b;">Você já pode fechar esta janela.</p>
+          </div>
+        `;
+        setTimeout(() => { window.close(); }, 1500);
+      }
+    }
+
     window.onload = () => {
       initChart();
       loadHardware();
@@ -768,6 +804,7 @@ class ControlCenterHandler(SimpleHTTPRequestHandler):
         return  # Silence access logs
 
     def do_GET(self) -> None:
+        session.record_activity()
         parsed = urlparse(self.path)
 
         if parsed.path in {"/", "/index.html"}:
@@ -793,9 +830,11 @@ class ControlCenterHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(session.get_state()).encode("utf-8"))
             return
 
-        super().do_GET()
+        self.send_response(404)
+        self.end_headers()
 
     def do_POST(self) -> None:
+        session.record_activity()
         parsed = urlparse(self.path)
         content_len = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
@@ -803,6 +842,15 @@ class ControlCenterHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body)
         except Exception:
             payload = {}
+
+        if parsed.path == "/api/shutdown":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "shutting_down"}).encode("utf-8"))
+            session.log("Sinal de encerramento recebido via interface.")
+            threading.Thread(target=lambda: (time.sleep(0.5), os._exit(0)), daemon=True).start()
+            return
 
         if parsed.path == "/api/start":
             if session.is_running:
