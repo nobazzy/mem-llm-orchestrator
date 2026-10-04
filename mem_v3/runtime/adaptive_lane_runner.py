@@ -457,21 +457,27 @@ class AdaptiveLaneRunner:
             else:
                 ckpt_path = self.checkpoint_manager.latest_checkpoint_path()
             if ckpt_path and Path(ckpt_path).exists():
-                print(f"  -> Carregando checkpoint: {ckpt_path}")
-                ckpt_payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
-                model.load_state_dict(ckpt_payload["model_state_dict"])
-                if "optimizer_state_dict" in ckpt_payload and ckpt_payload["optimizer_state_dict"]:
-                    try:
-                        optimizer.load_state_dict(ckpt_payload["optimizer_state_dict"])
-                    except Exception:
-                        pass
-                meta = ckpt_payload.get("metadata", {})
-                initial_step = int(meta.get("step", 0))
-                total_tokens_processed = int(meta.get("tokens_processed", 0))
-                loss_val = float(meta.get("loss", 0.0))
-                loss_first = loss_val
-                loss_last = loss_val
-                print(f"  -> Checkpoint carregado! Retomando a partir do step {initial_step:,} ({total_tokens_processed:,} tokens, Loss: {loss_val:.4f}).")
+                print(f"  -> Loading checkpoint: {ckpt_path}")
+                try:
+                    ckpt_payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
+                    model.load_state_dict(ckpt_payload["model_state_dict"])
+                    if "optimizer_state_dict" in ckpt_payload and ckpt_payload["optimizer_state_dict"]:
+                        try:
+                            optimizer.load_state_dict(ckpt_payload["optimizer_state_dict"])
+                        except Exception:
+                            pass
+                    meta = ckpt_payload.get("metadata", {})
+                    initial_step = int(meta.get("step", 0))
+                    total_tokens_processed = int(meta.get("tokens_processed", 0))
+                    loss_val = float(meta.get("loss", 0.0))
+                    loss_first = loss_val
+                    loss_last = loss_val
+                    print(f"  -> Checkpoint loaded! Resuming from step {initial_step:,} ({total_tokens_processed:,} tokens, Loss: {loss_val:.4f}).")
+                except Exception as _ckpt_err:
+                    print(f"  [Checkpoint Architecture Mismatch] Saved checkpoint has different layer dimensions from current preset '{model_preset}': {_ckpt_err}")
+                    print(f"  -> Initializing fresh model weights for '{model_preset}' starting from step 0.")
+                    initial_step = 0
+                    total_tokens_processed = 0
 
         self._log_event("training_started", {
             "lane": self.current_lane.name,

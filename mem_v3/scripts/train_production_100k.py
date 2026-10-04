@@ -15,17 +15,11 @@ import threading
 import time
 from pathlib import Path
 
-# Configure Windows native SSL certificates & sanitize cert environment
-for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
-    _val = os.environ.get(_ca_env)
-    if _val and not os.path.exists(_val):
-        os.environ.pop(_ca_env, None)
-
+# Configure robust SSL certificates using certifi bundle on Windows
 try:
-    import truststore
-    truststore.inject_into_ssl()
-    import urllib3.util.ssl_
-    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
+    import certifi
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 except Exception:
     pass
 
