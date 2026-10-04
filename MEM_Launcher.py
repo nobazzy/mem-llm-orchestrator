@@ -51,10 +51,29 @@ def find_browser() -> str | None:
     return None
 
 
+def kill_stale_processes():
+    try:
+        import psutil
+        curr_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.info['pid'] != curr_pid and proc.info['cmdline']:
+                    cmdline = ' '.join(proc.info['cmdline'])
+                    if 'control_center.py' in cmdline or 'train_production_100k.py' in cmdline:
+                        proc.kill()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def main():
     print("=" * 66)
     print("  MEM ORCHESTRATOR - PRODUCTION LLM TRAINING STUDIO")
     print("=" * 66)
+
+    # Clean any stale orphan processes to guarantee clean port and updated code
+    kill_stale_processes()
 
     from mem_v3.application.control_center import run_control_center, session
 

@@ -1084,6 +1084,7 @@ class ControlCenterHandler(SimpleHTTPRequestHandler):
 
 
 def run_control_center(port: int = 8089) -> int:
+    ThreadingHTTPServer.allow_reuse_address = True
     for p in [port, 8089, 8090, 8080, 8888]:
         try:
             server = ThreadingHTTPServer(("127.0.0.1", p), ControlCenterHandler)
