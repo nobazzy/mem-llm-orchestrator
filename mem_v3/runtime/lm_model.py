@@ -86,6 +86,30 @@ class TinyCausalTransformer(nn.Module):
 
 def build_tiny_causal_lm(vocab_size: int, seq_len: int, preset: str = "tiny_decoder") -> nn.Module:
 
+    if preset in {"ultra_500m", "decoder_500m", "500m_decoder", "500m"}:
+        # Approx. 539.2M parameters with GPT-2 vocabulary and tied embeddings.
+        # Scaled 500M architecture: d_model=1280, heads=20, layers=24, ff=5120.
+        return TinyCausalTransformer(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            d_model=1280,
+            nhead=20,
+            num_layers=24,
+            dim_feedforward=5120,
+        )
+
+    if preset in {"xxlarge_400m", "decoder_400m", "400m_decoder", "400m"}:
+        # Approx. 421.1M parameters with GPT-2 vocabulary and tied embeddings.
+        # Scaled 400M architecture: d_model=1280, heads=20, layers=18, ff=5120.
+        return TinyCausalTransformer(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            d_model=1280,
+            nhead=20,
+            num_layers=18,
+            dim_feedforward=5120,
+        )
+
     if preset in {"xlarge_250m", "decoder_250m", "250m_decoder", "250m"}:
         # Approx. 255.1M parameters with GPT-2 vocabulary and tied embeddings.
         # Scaled 250M architecture: d_model=1024, heads=16, layers=16, ff=4096.

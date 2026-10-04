@@ -508,6 +508,8 @@ HTML_PAGE = """<!DOCTYPE html>
           <option value="large_130m" selected>large_130m — 130M Params (Recommended for 8GB VRAM)</option>
           <option value="medium_75m">medium_75m — 75M Params (High Throughput)</option>
           <option value="xlarge_250m">xlarge_250m — 250M Params (High Capacity)</option>
+          <option value="xxlarge_400m">xxlarge_400m — 420M Params (High VRAM Stress Test)</option>
+          <option value="ultra_500m">ultra_500m — 540M Params (8GB VRAM Limit & Zero-OOM Defense)</option>
           <option value="medium_50m">medium_50m — 50M Params (Lightweight)</option>
         </select>
       </div>
@@ -777,6 +779,8 @@ HTML_PAGE = """<!DOCTYPE html>
       if (val === 'large_130m') hint.textContent = '130M Params (12 layers, 12 heads, 768 dim)';
       if (val === 'medium_75m') hint.textContent = '75M Params (8 layers, 10 heads, 640 dim)';
       if (val === 'xlarge_250m') hint.textContent = '250M Params (16 layers, 16 heads, 1024 dim)';
+      if (val === 'xxlarge_400m') hint.textContent = '420M Params (18 layers, 20 heads, 1280 dim — ~5.4GB VRAM)';
+      if (val === 'ultra_500m') hint.textContent = '540M Params (24 layers, 20 heads, 1280 dim — 8GB Ceiling)';
       if (val === 'medium_50m') hint.textContent = '50M Params (6 layers, 8 heads, 512 dim)';
     }
 

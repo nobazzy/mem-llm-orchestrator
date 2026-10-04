@@ -57,7 +57,7 @@ def format_duration(seconds: float) -> str:
 def main():
     parser = argparse.ArgumentParser(description="MEM Orchestrator - Real 100k Pre-Training Run")
     parser.add_argument("--steps", type=int, default=100000, help="Total training steps (default: 100,000)")
-    parser.add_argument("--model-preset", default="large_130m", choices=["large_130m", "xlarge_250m", "medium_75m"], help="Model size (default: large_130m)")
+    parser.add_argument("--model-preset", default="large_130m", choices=["ultra_500m", "xxlarge_400m", "xlarge_250m", "large_130m", "medium_100m", "medium_75m", "medium_50m", "tiny_15m"], help="Model architecture preset (default: large_130m)")
     parser.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu", help="Primary dataset")
     parser.add_argument("--dataset-config", default="sample-10BT", help="Dataset configuration")
     parser.add_argument("--fallback-dataset", default="roneneldan/TinyStories", help="Fallback dataset if network drops")
@@ -82,13 +82,15 @@ def main():
     if args.clean and ckpt_root.exists():
         archive_dir = ckpt_root / f"archive_{time.strftime('%Y%m%d_%H%M%S')}"
         archive_dir.mkdir(parents=True, exist_ok=True)
-        import shutil
         for item in ckpt_root.iterdir():
-            if item.is_dir() and not item.name.startswith("archive_"):
-                shutil.move(str(item), str(archive_dir / item.name))
-            elif item.is_file() and item.name.endswith(".txt"):
-                shutil.move(str(item), str(archive_dir / item.name))
-        print(f">>> [CLEAN START] Checkpoints anteriores arquivados com sucesso em: {archive_dir.name}\n")
+            try:
+                if item.is_dir() and not item.name.startswith("archive_"):
+                    shutil.move(str(item), str(archive_dir / item.name))
+                elif item.is_file() and item.name.endswith(".txt"):
+                    shutil.move(str(item), str(archive_dir / item.name))
+            except Exception:
+                pass
+        print(f">>> [CLEAN START] Prior checkpoints archived to: {archive_dir.name}\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"

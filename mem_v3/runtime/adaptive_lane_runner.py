@@ -140,6 +140,74 @@ def get_lanes_for_model(model_preset: str = "medium_75m", seq_len: int = 256) ->
             ),
         }
 
+    if model_preset in {"ultra_500m", "decoder_500m", "500m_decoder", "500m"}:
+        return {
+            "aggressive_seq256_zero0_gacc4": LaneConfig(
+                name="aggressive_seq256_zero0_gacc4",
+                batch_size=3,
+                sequence_length=256,
+                gradient_accumulation_steps=4,
+                min_tokens_floor=1500.0,
+                expected_peak_tokens=6000.0,
+                precision="fp16",
+                notes="Primary 500M high-utilization lane for 8GB GPU (~6.5GB VRAM)",
+            ),
+            "fast_seq256_zero0_gacc4": LaneConfig(
+                name="fast_seq256_zero0_gacc4",
+                batch_size=2,
+                sequence_length=256,
+                gradient_accumulation_steps=4,
+                min_tokens_floor=1000.0,
+                expected_peak_tokens=4500.0,
+                precision="fp16",
+                notes="Stable 500M intermediate lane (~6.2GB VRAM)",
+            ),
+            "safe_seq256": LaneConfig(
+                name="safe_seq256",
+                batch_size=1,
+                sequence_length=256,
+                gradient_accumulation_steps=2,
+                min_tokens_floor=500.0,
+                expected_peak_tokens=2500.0,
+                precision="fp16",
+                notes="Conservative recovery 500M lane (Zero-OOM ceiling)",
+            ),
+        }
+
+    if model_preset in {"xxlarge_400m", "decoder_400m", "400m_decoder", "400m"}:
+        return {
+            "aggressive_seq256_zero0_gacc4": LaneConfig(
+                name="aggressive_seq256_zero0_gacc4",
+                batch_size=4,
+                sequence_length=256,
+                gradient_accumulation_steps=4,
+                min_tokens_floor=2500.0,
+                expected_peak_tokens=9000.0,
+                precision="fp16",
+                notes="Primary 400M high-utilization lane for 8GB GPU (~5.4GB VRAM)",
+            ),
+            "fast_seq256_zero0_gacc4": LaneConfig(
+                name="fast_seq256_zero0_gacc4",
+                batch_size=2,
+                sequence_length=256,
+                gradient_accumulation_steps=4,
+                min_tokens_floor=1500.0,
+                expected_peak_tokens=6000.0,
+                precision="fp16",
+                notes="Stable 400M intermediate lane (~5.1GB VRAM)",
+            ),
+            "safe_seq256": LaneConfig(
+                name="safe_seq256",
+                batch_size=1,
+                sequence_length=256,
+                gradient_accumulation_steps=2,
+                min_tokens_floor=800.0,
+                expected_peak_tokens=3500.0,
+                precision="fp16",
+                notes="Conservative recovery 400M lane (Zero-OOM ceiling)",
+            ),
+        }
+
     if model_preset in {"large_130m", "decoder_130m", "130m_decoder", "130m", "medium_100m"}:
         return {
             "ultra_peak_seq256": LaneConfig(
