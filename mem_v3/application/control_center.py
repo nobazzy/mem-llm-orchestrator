@@ -258,10 +258,9 @@ def _training_worker(config: Dict[str, Any]):
         )
         session.process = proc
 
-        # Regular expressions for matching production telemetry
-        # Format: Step 000100/100000 ( 0.10%) | Loss: 7.2341 (avg: 7.4521) | Val: 6.9812 | Speed: 12500 tok/s ( 4.2 st/s) | VRAM: 3412MB (42.0%) | Lane: [AGGRESSIVE] | ETA: 02h 15m 30s
+        ansi_cleaner = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
         telemetry_pattern = re.compile(
-            r"Step\s+(\d+)/(\d+)\s+\(([\d\.]+)%\)\s+\|\s+Loss:\s+([\d\.]+)(?:\s+\(avg:\s+([\d\.]+)\))?(?:\s+\|\s+Val:\s+([\d\.]+))?\s+\|\s+Speed:\s+([\d\.]+)\s+tok/s\s+\(([\d\.]+)\s+st/s\)\s+\|\s+VRAM:\s+([\d\.]+)MB\s+\(([\d\.]+)%\)\s+\|\s+Lane:\s+(.*?)\s+\|\s+ETA:\s+(.*)"
+            r"Step\s+(\d+)/(\d+)\s+\(\s*([\d\.]+)%\)\s+\|\s+Loss:\s+([\d\.]+)(?:\s+\(avg:\s+([\d\.]+)\))?(?:\s+\|\s+Val:\s+([\d\.]+))?\s+\|\s+Speed:\s+([\d\.]+)\s+tok/s\s+\(\s*([\d\.]+)\s+st/s\)\s+\|\s+VRAM:\s+([\d\.]+)MB\s+\(\s*([\d\.]+)%\)\s+\|\s+Lane:\s+(.*?)\s+\|\s+ETA:\s+(.*)"
         )
 
         for line in iter(proc.stdout.readline, ""):
@@ -269,10 +268,11 @@ def _training_worker(config: Dict[str, Any]):
             if not line_str:
                 continue
 
-            session.log(line_str)
+            clean_line = ansi_cleaner.sub("", line_str).strip()
+            session.log(clean_line)
 
             # Check if line contains telemetry
-            match = telemetry_pattern.search(line_str)
+            match = telemetry_pattern.search(clean_line)
             if match:
                 s_curr = int(match.group(1))
                 s_tot = int(match.group(2))
@@ -282,9 +282,8 @@ def _training_worker(config: Dict[str, Any]):
                 tok_s = float(match.group(7))
                 st_s = float(match.group(8))
                 vram_m = float(match.group(9))
-                # Strip ANSI codes from lane
-                clean_lane = re.sub(r"\x1b\[[0-9;]*m", "", match.group(11)).strip("[] ")
-                clean_eta = re.sub(r"\x1b\[[0-9;]*m", "", match.group(12)).strip()
+                clean_lane = match.group(11).strip("[] ")
+                clean_eta = match.group(12).strip()
 
                 hw = get_hardware_info()
                 tot_v = hw["vram_total_mb"] or 8123.0
@@ -301,6 +300,36 @@ def _training_worker(config: Dict[str, Any]):
                     lane=clean_lane,
                     eta=clean_eta,
                 )
+            elif "Step " in clean_line and "Loss:" in clean_line:
+                # Robust keyword-based fallback extractor
+                step_m = re.search(r"Step\s+(\d+)/(\d+)", clean_line)
+                loss_m = re.search(r"Loss:\s+([\d\.]+)", clean_line)
+                speed_m = re.search(r"Speed:\s+([\d\.]+)\s+tok/s", clean_line)
+                vram_m = re.search(r"VRAM:\s+([\d\.]+)MB", clean_line)
+                lane_m = re.search(r"Lane:\s+(\[.*?\]|\S+)", clean_line)
+                val_m = re.search(r"Val:\s+([\d\.]+)", clean_line)
+                eta_m = re.search(r"ETA:\s+([^\s\|]+(?:\s+[^\s\|]+)*)", clean_line)
+                if step_m and loss_m:
+                    s_curr = int(step_m.group(1))
+                    s_tot = int(step_m.group(2))
+                    loss = float(loss_m.group(1))
+                    tok_s = float(speed_m.group(1)) if speed_m else 0.0
+                    vram_val = float(vram_m.group(1)) if vram_m else 0.0
+                    lane_val = lane_m.group(1).strip("[] ") if lane_m else "AGGRESSIVE"
+                    val_val = float(val_m.group(1)) if val_m else None
+                    eta_val = eta_m.group(1).strip() if eta_m else "--:--:--"
+                    session.update_telemetry(
+                        step=s_curr,
+                        loss=loss,
+                        avg_loss=loss,
+                        val_loss=val_val,
+                        speed=tok_s,
+                        step_rate=0.0,
+                        vram_mb=vram_val,
+                        vram_tot=8123.0,
+                        lane=lane_val,
+                        eta=eta_val,
+                    )
 
             if session.should_stop:
                 proc.terminate()
