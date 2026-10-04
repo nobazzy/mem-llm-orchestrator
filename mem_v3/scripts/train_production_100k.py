@@ -161,9 +161,10 @@ def main():
         else:
             lane_badge = f"{GREEN}[{lane_raw}]{RESET}"
 
+        switches_cnt = len([e for e in getattr(r, "lane_history", []) if e.get("event") == "lane_switched"])
         pct_done = (step / args.steps) * 100.0
         val_str = f" | {CYAN}Val: {r.latest_val_loss:.4f}{RESET}" if getattr(r, "latest_val_loss", None) is not None else ""
-        print(f"Step {step:06d}/{args.steps:06d} ({pct_done:5.2f}%) | Loss: {loss:.4f} (avg: {avg_loss:.4f}){val_str} | Speed: {tok_sec:6.0f} tok/s ({step_rate:4.1f} st/s) | VRAM: {vram_alloc:4.0f}MB ({vram_pct:4.1f}%) | Lane: {lane_badge} | ETA: {eta_str}", flush=True)
+        print(f"Step {step:06d}/{args.steps:06d} ({pct_done:5.2f}%) | Loss: {loss:.4f} (avg: {avg_loss:.4f}){val_str} | Speed: {tok_sec:6.0f} tok/s ({step_rate:4.1f} st/s) | VRAM: {vram_alloc:4.0f}MB ({vram_pct:4.1f}%) | Lane: {lane_badge} (Switches: {switches_cnt}) | ETA: {eta_str}", flush=True)
 
     try:
         result = runner.train_loop(

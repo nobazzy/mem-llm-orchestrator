@@ -791,9 +791,8 @@ class AdaptiveLaneRunner:
                             val_batcher._refill_watermark = (val_batcher.sequence_length + 1) * val_batcher.batch_size * 4
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
-                            import gc
-                            gc.collect()
-                        print(f"\n>>> [LANE GOVERNOR] Step {step:,}: {old_lane_name} -> {new_lane.name} (Batch Size: {new_lane.batch_size}) | {trans_reason}\n", flush=True)
+                        switch_num = len([e for e in self.lane_history if e.get("event") == "lane_switched"]) + 1
+                        print(f"\n>>> [LANE GOVERNOR] Step {step:,}: {old_lane_name} -> {new_lane.name} (Batch Size: {new_lane.batch_size}) | Switch #{switch_num} | {trans_reason}\n", flush=True)
                         self._log_event("lane_switched", {
                             "from_lane": old_lane_name,
                             "to_lane": new_lane.name,

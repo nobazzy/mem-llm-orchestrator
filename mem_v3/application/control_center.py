@@ -49,6 +49,8 @@ class ProductionTrainingSession:
         self.vram_used_mb = 0.0
         self.vram_total_mb = 8123.0
         self.active_lane = "IDLE"
+        self.lane_switches = 0
+        self.lane_events: List[Dict[str, Any]] = []
         self.eta_str = "--:--:--"
         self.history_loss: List[Dict[str, Any]] = []
         self.history_val: List[Dict[str, Any]] = []
@@ -79,6 +81,16 @@ class ProductionTrainingSession:
             if len(self.logs) > 600:
                 self.logs.pop(0)
 
+    def record_lane_switch(self, event: Dict[str, Any]):
+        with self.lock:
+            self.lane_switches += 1
+            event["switch_id"] = self.lane_switches
+            event["time"] = time.strftime("%H:%M:%S")
+            self.lane_events.append(event)
+            if len(self.lane_events) > 50:
+                self.lane_events.pop(0)
+        self.log(f"Lane Transition #{self.lane_switches}: {event.get('from_lane')} -> {event.get('to_lane')} | {event.get('reason')}")
+
     def reset_for_run(self, config: Dict[str, Any]):
         with self.lock:
             self.is_running = True
@@ -91,6 +103,8 @@ class ProductionTrainingSession:
             self.speed_tokens_sec = 0.0
             self.step_rate = 0.0
             self.active_lane = "INITIALIZING"
+            self.lane_switches = 0
+            self.lane_events.clear()
             self.eta_str = "Calculating..."
             self.history_loss.clear()
             self.history_val.clear()
@@ -111,6 +125,7 @@ class ProductionTrainingSession:
         vram_tot: float,
         lane: str,
         eta: str,
+        switches: Optional[int] = None,
     ):
         with self.lock:
             self.current_step = step
@@ -128,6 +143,8 @@ class ProductionTrainingSession:
             self.vram_total_mb = vram_tot
             self.active_lane = lane
             self.eta_str = eta
+            if switches is not None and switches > self.lane_switches:
+                self.lane_switches = switches
 
             self.history_loss.append({
                 "step": step,
@@ -163,6 +180,8 @@ class ProductionTrainingSession:
                 "vram_total_mb": round(self.vram_total_mb, 1),
                 "vram_pct": round(vram_pct, 1),
                 "active_lane": self.active_lane,
+                "lane_switches": self.lane_switches,
+                "lane_events": list(self.lane_events[-20:]),
                 "eta_str": self.eta_str,
                 "history_loss": list(self.history_loss[-80:]),
                 "history_val": list(self.history_val[-40:]),
@@ -260,7 +279,7 @@ def _training_worker(config: Dict[str, Any]):
 
         ansi_cleaner = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
         telemetry_pattern = re.compile(
-            r"Step\s+(\d+)/(\d+)\s+\(\s*([\d\.]+)%\)\s+\|\s+Loss:\s+([\d\.]+)(?:\s+\(avg:\s+([\d\.]+)\))?(?:\s+\|\s+Val:\s+([\d\.]+))?\s+\|\s+Speed:\s+([\d\.]+)\s+tok/s\s+\(\s*([\d\.]+)\s+st/s\)\s+\|\s+VRAM:\s+([\d\.]+)MB\s+\(\s*([\d\.]+)%\)\s+\|\s+Lane:\s+(.*?)\s+\|\s+ETA:\s+(.*)"
+            r"Step\s+(\d+)/(\d+)\s+\(\s*([\d\.]+)%\)\s+\|\s+Loss:\s+([\d\.]+)(?:\s+\(avg:\s+([\d\.]+)\))?(?:\s+\|\s+Val:\s+([\d\.]+))?\s+\|\s+Speed:\s+([\d\.]+)\s+tok/s\s+\(\s*([\d\.]+)\s+st/s\)\s+\|\s+VRAM:\s+([\d\.]+)MB\s+\(\s*([\d\.]+)%\)\s+\|\s+Lane:\s+(.*?)(?:\s+\(Switches:\s*(\d+)\))?\s+\|\s+ETA:\s+(.*)"
         )
 
         for line in iter(proc.stdout.readline, ""):
@@ -270,6 +289,19 @@ def _training_worker(config: Dict[str, Any]):
 
             clean_line = ansi_cleaner.sub("", line_str).strip()
             session.log(clean_line)
+
+            # Check if line records a lane governor switch
+            if ">>> [LANE GOVERNOR]" in clean_line:
+                gov_m = re.search(r"Step\s+([\d,]+):\s+(\S+)\s+->\s+(\S+)\s+\(Batch Size:\s*(\d+)\)(?:\s+\|\s+Switch\s+#(\d+))?\s+\|\s+(.*)", clean_line)
+                if gov_m:
+                    session.record_lane_switch({
+                        "step": int(gov_m.group(1).replace(",", "")),
+                        "from_lane": gov_m.group(2),
+                        "to_lane": gov_m.group(3),
+                        "batch_size": int(gov_m.group(4)),
+                        "switch_num": int(gov_m.group(5)) if gov_m.group(5) else (session.lane_switches + 1),
+                        "reason": gov_m.group(6).strip(),
+                    })
 
             # Check if line contains telemetry
             match = telemetry_pattern.search(clean_line)
@@ -283,7 +315,8 @@ def _training_worker(config: Dict[str, Any]):
                 st_s = float(match.group(8))
                 vram_m = float(match.group(9))
                 clean_lane = match.group(11).strip("[] ")
-                clean_eta = match.group(12).strip()
+                switches_val = int(match.group(12)) if match.group(12) else None
+                clean_eta = match.group(13).strip()
 
                 hw = get_hardware_info()
                 tot_v = hw["vram_total_mb"] or 8123.0
@@ -299,6 +332,7 @@ def _training_worker(config: Dict[str, Any]):
                     vram_tot=tot_v,
                     lane=clean_lane,
                     eta=clean_eta,
+                    switches=switches_val,
                 )
             elif "Step " in clean_line and "Loss:" in clean_line:
                 # Robust keyword-based fallback extractor
@@ -307,6 +341,7 @@ def _training_worker(config: Dict[str, Any]):
                 speed_m = re.search(r"Speed:\s+([\d\.]+)\s+tok/s", clean_line)
                 vram_m = re.search(r"VRAM:\s+([\d\.]+)MB", clean_line)
                 lane_m = re.search(r"Lane:\s+(\[.*?\]|\S+)", clean_line)
+                switches_m = re.search(r"Switches:\s*(\d+)", clean_line)
                 val_m = re.search(r"Val:\s+([\d\.]+)", clean_line)
                 eta_m = re.search(r"ETA:\s+([^\s\|]+(?:\s+[^\s\|]+)*)", clean_line)
                 if step_m and loss_m:
@@ -316,6 +351,7 @@ def _training_worker(config: Dict[str, Any]):
                     tok_s = float(speed_m.group(1)) if speed_m else 0.0
                     vram_val = float(vram_m.group(1)) if vram_m else 0.0
                     lane_val = lane_m.group(1).strip("[] ") if lane_m else "AGGRESSIVE"
+                    switches_val = int(switches_m.group(1)) if switches_m else None
                     val_val = float(val_m.group(1)) if val_m else None
                     eta_val = eta_m.group(1).strip() if eta_m else "--:--:--"
                     session.update_telemetry(
@@ -329,6 +365,7 @@ def _training_worker(config: Dict[str, Any]):
                         vram_tot=8123.0,
                         lane=lane_val,
                         eta=eta_val,
+                        switches=switches_val,
                     )
 
             if session.should_stop:
@@ -345,6 +382,7 @@ def _training_worker(config: Dict[str, Any]):
             "steps_completed": session.current_step,
             "final_loss": session.loss,
             "val_loss": session.val_loss,
+            "lane_switches": session.lane_switches,
         }
         session.finish_run(success, summary)
 
@@ -353,31 +391,97 @@ def _training_worker(config: Dict[str, Any]):
         session.finish_run(False, {"error": str(e)})
 
 
-def _run_inference_worker(prompt: str, temperature: float, max_tokens: int) -> str:
+def _run_inference_worker(
+    prompt: str,
+    temperature: float = 0.7,
+    max_tokens: int = 100,
+    top_k: int = 40,
+    repetition_penalty: float = 1.15,
+    device: str = "auto",
+) -> Dict[str, Any]:
     venv_py = _root / ".venv" / "Scripts" / "python.exe"
     py_exec = str(venv_py) if venv_py.exists() else sys.executable
     script_path = _root / "scripts" / "run_inference.py"
 
     if not script_path.exists():
-        return f"Error: Inference script '{script_path.name}' not found."
+        return {"status": "error", "error": f"Inference script '{script_path.name}' not found."}
+
+    # Intelligent device routing:
+    # If training is actively running, force CPU to prevent VRAM contention.
+    # If training is idle, use CUDA if available for maximum throughput.
+    if device == "auto":
+        target_device = "cpu" if session.is_running else ("cuda" if torch.cuda.is_available() else "cpu")
+    elif device == "cuda" and session.is_running:
+        target_device = "cuda" if (torch.cuda.is_available() and session.vram_used_mb < 6000) else "cpu"
+    else:
+        target_device = device if (device == "cuda" and torch.cuda.is_available()) else "cpu"
 
     cmd = [
-        py_exec, str(script_path),
+        py_exec, "-u", str(script_path),
         "--prompt", prompt,
         "--temperature", str(temperature),
         "--max-tokens", str(max_tokens),
+        "--top-k", str(top_k),
+        "--repetition-penalty", str(repetition_penalty),
+        "--device", target_device,
     ]
 
+    timeout_sec = max(60, int(max_tokens * 0.75))
+    t0 = time.perf_counter()
     try:
-        res = subprocess.run(cmd, cwd=str(_root), capture_output=True, text=True, timeout=40)
+        res = subprocess.run(
+            cmd,
+            cwd=str(_root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            encoding="utf-8",
+            errors="replace",
+        )
+        elapsed = time.perf_counter() - t0
         output = res.stdout.strip()
         if not output and res.stderr:
             output = res.stderr.strip()
-        return output if output else "No output generated."
+
+        clean_text = ""
+        meta_info = {}
+        if "<<<GENERATION_OUTPUT>>>" in output and "<<<END_GENERATION_OUTPUT>>>" in output:
+            parts = output.split("<<<GENERATION_OUTPUT>>>")
+            gen_part = parts[1].split("<<<END_GENERATION_OUTPUT>>>")[0]
+            clean_text = gen_part.strip()
+        else:
+            d_parts = output.split("-" * 70)
+            if len(d_parts) >= 3:
+                clean_text = d_parts[1].strip()
+            else:
+                clean_text = output
+
+        if "<<<GENERATION_META>>>:" in output:
+            meta_line = [l for l in output.splitlines() if "<<<GENERATION_META>>>:" in l]
+            if meta_line:
+                raw_meta = meta_line[0].split("<<<GENERATION_META>>>:")[1].strip()
+                for item in raw_meta.split(","):
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        meta_info[k.strip()] = v.strip()
+
+        gen_tokens = int(meta_info.get("tokens", max_tokens))
+        speed_str = meta_info.get("speed", f"{gen_tokens / max(0.01, elapsed):.1f} tok/s")
+        dev_desc = "GPU (CUDA)" if target_device == "cuda" else "CPU (Zero-VRAM Contention)"
+
+        return {
+            "status": "success",
+            "generated_text": clean_text if clean_text else "No output generated.",
+            "tokens": gen_tokens,
+            "elapsed_sec": round(elapsed, 2),
+            "speed": speed_str,
+            "device": dev_desc,
+            "raw_output": output,
+        }
     except subprocess.TimeoutExpired:
-        return "Error: Inference generation timed out (40s limit)."
+        return {"status": "error", "error": f"Inference execution timed out ({timeout_sec}s). Try reducing max tokens or switching to GPU."}
     except Exception as e:
-        return f"Inference execution failed: {str(e)}"
+        return {"status": "error", "error": f"Inference execution failed: {str(e)}"}
 
 
 # Production HTML5/CSS3 Dashboard - 100% in English
@@ -441,9 +545,9 @@ HTML_PAGE = """<!DOCTYPE html>
     .btn-secondary { background: #1e293b; color: var(--text); border: 1px solid #334155; }
     .btn-secondary:hover { background: #334155; }
 
-    .stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
-    @media (max-width: 1400px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stats-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; }
+    @media (max-width: 1400px) { .stats-grid { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
     
     .stat-box { background: #0c1220; border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
     .stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); }
@@ -462,12 +566,15 @@ HTML_PAGE = """<!DOCTYPE html>
     .vram-bar-fill { height: 100%; background-color: #06b6d4; width: 0%; transition: width 0.3s, background-color 0.3s; }
 
     .chart-container { position: relative; height: 260px; width: 100%; }
-    .console-box { background-color: #040810; border: 1px solid #1a2233; border-radius: 8px; padding: 12px; font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; color: #cbd5e1; height: 160px; overflow-y: auto; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+    .console-box { background-color: #040810; border: 1px solid #1a2233; border-radius: 8px; padding: 12px; font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; color: #cbd5e1; height: 150px; overflow-y: auto; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 
-    .inference-box { display: flex; flex-direction: column; gap: 12px; }
-    textarea { width: 100%; height: 75px; background-color: #0c1220; border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 10px; font-size: 13px; resize: none; outline: none; }
+    .pill-btn { background: #1e293b; border: 1px solid #334155; border-radius: 12px; color: #94a3b8; padding: 3px 10px; font-size: 11px; cursor: pointer; transition: all 0.2s; font-weight: 500; }
+    .pill-btn:hover { background: #334155; color: #f1f5f9; border-color: #06b6d4; }
+
+    .inference-box { display: flex; flex-direction: column; gap: 14px; }
+    textarea { width: 100%; height: 80px; background-color: #0c1220; border: 1px solid var(--card-border); border-radius: 8px; color: var(--text); padding: 12px; font-size: 13px; resize: none; outline: none; line-height: 1.5; }
     textarea:focus { border-color: var(--cyan); }
-    .output-text { background: #040810; border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; min-height: 80px; font-size: 13px; color: #38bdf8; line-height: 1.6; }
+    .output-text { background: #040810; border: 1px solid var(--card-border); border-radius: 8px; padding: 14px; min-height: 90px; font-size: 13px; color: #38bdf8; line-height: 1.6; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -607,7 +714,7 @@ HTML_PAGE = """<!DOCTYPE html>
     <!-- RIGHT: LIVE PRODUCTION TELEMETRY & ANALYTICS -->
     <div style="display: flex; flex-direction: column; gap: 20px;">
       
-      <!-- KPI STATS OVERVIEW -->
+      <!-- KPI STATS OVERVIEW: 7 COMPREHENSIVE CARDS -->
       <div class="stats-grid">
         <div class="stat-box">
           <span class="stat-label">Global Step</span>
@@ -652,6 +759,12 @@ HTML_PAGE = """<!DOCTYPE html>
           </div>
           <span class="stat-sub" id="val-eta" style="margin-top: 4px;">ETA: --:--:--</span>
         </div>
+
+        <div class="stat-box">
+          <span class="stat-label">Lane Transitions</span>
+          <span class="stat-value" id="val-switches" style="color: #38bdf8;">0 switches</span>
+          <span class="stat-sub" id="val-switches-sub">Zero-OOM Guard Active</span>
+        </div>
       </div>
 
       <!-- DUAL CHARTS CARD -->
@@ -665,6 +778,17 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
       </div>
 
+      <!-- AUTONOMOUS LANE ADAPTATION LOG -->
+      <div class="card">
+        <div class="card-title">
+          <span>Autonomous Lane Adaptation Log</span>
+          <span id="lane-switches-badge" style="font-size: 11px; padding: 3px 8px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 600;">0 Switches</span>
+        </div>
+        <div id="lane-history-list" style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 12px; padding-right: 4px;">
+          <div style="color: var(--text-muted); font-size: 12px; font-style: italic;">No lane switches yet. The orchestrator is running on the primary calibrated lane.</div>
+        </div>
+      </div>
+
       <!-- LIVE TERMINAL CONSOLE -->
       <div class="card">
         <div class="card-title">
@@ -674,24 +798,83 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class="console-box" id="console-logs">Engine ready. Configure hyperparameters on the left and click 'Start Production Training'.</div>
       </div>
 
-      <!-- REAL-TIME INFERENCE PLAYGROUND -->
+      <!-- INTERACTIVE INFERENCE PLAYGROUND -->
       <div class="card">
         <div class="card-title">
           <span>Inference Playground (Checkpoint Verification)</span>
-          <span style="font-size: 11px; color: var(--accent);">Direct Model Execution</span>
+          <span style="font-size: 11px; color: var(--accent); font-weight: 600;">Autonomous Weight Generation</span>
         </div>
         <div class="inference-box">
-          <textarea id="prompt-input" placeholder="Enter prompt to test model text generation (e.g. 'Once upon a time in a distant realm...')..."></textarea>
-          <div style="display: flex; gap: 12px; align-items: center;">
-            <button class="btn btn-primary" id="btn-infer" onclick="runInference()" style="padding: 8px 18px; font-size: 13px;">
-              Generate Text
-            </button>
-            <div style="font-size: 12px; color: var(--text-muted); display: flex; gap: 14px;">
-              <span>Temperature: 0.7</span>
-              <span>Max Tokens: 80</span>
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+              <label class="form-label" style="margin: 0;">Input Prompt</label>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="pill-btn" onclick="setPrompt('Once upon a time in a forgotten forest,')">Story</button>
+                <button type="button" class="pill-btn" onclick="setPrompt('The artificial intelligence system discovered that')">AI</button>
+                <button type="button" class="pill-btn" onclick="setPrompt('The fundamental laws of astrophysics state that')">Physics</button>
+              </div>
+            </div>
+            <textarea id="prompt-input" placeholder="Enter prompt to test model text generation (e.g. 'Once upon a time in a distant realm...')..."></textarea>
+          </div>
+
+          <!-- Playground Controls -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; background: #0c1220; padding: 14px; border-radius: 8px; border: 1px solid var(--card-border);">
+            <!-- Max Tokens Slider & Input -->
+            <div class="form-group">
+              <div class="form-label">
+                <span>Max Tokens</span>
+                <span id="tokens-display" style="color: var(--cyan); font-weight: 700;">100</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="range" id="tokens-range" min="10" max="1024" step="10" value="100" oninput="syncTokens(this.value)" style="flex: 1;">
+                <input type="number" id="tokens-input" min="10" max="2048" step="10" value="100" oninput="syncTokens(this.value)" style="width: 70px; text-align: center; padding: 6px;">
+              </div>
+              <span class="form-hint">Tokens to generate (10 - 2,048)</span>
+            </div>
+
+            <!-- Temperature Slider & Input -->
+            <div class="form-group">
+              <div class="form-label">
+                <span>Temperature</span>
+                <span id="temp-display" style="color: var(--yellow); font-weight: 700;">0.70</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="range" id="temp-range" min="0.05" max="2.00" step="0.05" value="0.70" oninput="syncTemp(this.value)" style="flex: 1;">
+                <input type="number" id="temp-input" min="0.05" max="2.00" step="0.05" value="0.70" oninput="syncTemp(this.value)" style="width: 70px; text-align: center; padding: 6px;">
+              </div>
+              <span class="form-hint" id="temp-tag">Balanced (0.70)</span>
+            </div>
+
+            <!-- Device Selector -->
+            <div class="form-group">
+              <div class="form-label">
+                <span>Inference Device</span>
+              </div>
+              <select id="infer-device" style="padding: 7px 10px;">
+                <option value="auto" selected>Auto (CPU if training, GPU if idle)</option>
+                <option value="cuda">GPU CUDA (Ultra Fast)</option>
+                <option value="cpu">CPU (Zero-VRAM Contention)</option>
+              </select>
+              <span class="form-hint">Prevents memory clash during training</span>
             </div>
           </div>
-          <div class="output-text" id="infer-output">Generated text output will appear here.</div>
+
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <button class="btn btn-primary" id="btn-infer" onclick="runInference()" style="padding: 9px 22px; font-size: 13px;">
+              Generate Text
+            </button>
+            <button class="btn btn-secondary" onclick="clearInference()" style="padding: 9px 14px; font-size: 12px;">
+              Clear
+            </button>
+            <button class="btn btn-secondary" id="btn-copy" onclick="copyInference()" style="padding: 9px 14px; font-size: 12px; margin-left: auto;">
+              Copy Text
+            </button>
+          </div>
+
+          <div>
+            <div class="output-text" id="infer-output">Generated text output will appear here. Configure prompt, tokens, and temperature above, then click 'Generate Text'.</div>
+            <div id="infer-meta" style="margin-top: 6px; font-size: 11px; color: var(--text-muted); display: none;"></div>
+          </div>
         </div>
       </div>
 
@@ -802,6 +985,53 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
+    function syncTokens(val) {
+      val = Math.max(10, Math.min(2048, parseInt(val) || 100));
+      document.getElementById('tokens-range').value = Math.min(1024, val);
+      document.getElementById('tokens-input').value = val;
+      document.getElementById('tokens-display').textContent = val;
+    }
+
+    function syncTemp(val) {
+      val = Math.max(0.05, Math.min(2.0, parseFloat(val) || 0.7));
+      const strVal = val.toFixed(2);
+      document.getElementById('temp-range').value = strVal;
+      document.getElementById('temp-input').value = strVal;
+      document.getElementById('temp-display').textContent = strVal;
+
+      const tagEl = document.getElementById('temp-tag');
+      if (val < 0.35) {
+        tagEl.textContent = `Focused / Deterministic (${strVal})`;
+        tagEl.style.color = '#38bdf8';
+      } else if (val <= 0.90) {
+        tagEl.textContent = `Balanced Natural (${strVal})`;
+        tagEl.style.color = '#10b981';
+      } else {
+        tagEl.textContent = `Creative / Stochastic (${strVal})`;
+        tagEl.style.color = '#f59e0b';
+      }
+    }
+
+    function setPrompt(text) {
+      document.getElementById('prompt-input').value = text;
+      document.getElementById('prompt-input').focus();
+    }
+
+    function clearInference() {
+      document.getElementById('infer-output').textContent = 'Output cleared.';
+      document.getElementById('infer-meta').style.display = 'none';
+    }
+
+    function copyInference() {
+      const text = document.getElementById('infer-output').textContent;
+      if (!text || text.startsWith('Generated text output') || text === 'Output cleared.') return;
+      navigator.clipboard.writeText(text);
+      const btn = document.getElementById('btn-copy');
+      const prev = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = prev; }, 1500);
+    }
+
     async function startTraining() {
       const preset = document.getElementById('model-preset').value;
       let dataset = document.getElementById('dataset-select').value;
@@ -904,6 +1134,27 @@ HTML_PAGE = """<!DOCTYPE html>
 
         document.getElementById('val-eta').textContent = `ETA: ${st.eta_str}`;
 
+        // Lane switches KPI
+        const switchCount = st.lane_switches || 0;
+        document.getElementById('val-switches').textContent = `${switchCount} switch${switchCount === 1 ? '' : 'es'}`;
+        document.getElementById('val-switches-sub').textContent = switchCount > 0 ? `Dynamic Adaptation Active` : `Zero-OOM Guard Active`;
+        document.getElementById('lane-switches-badge').textContent = `${switchCount} Switch${switchCount === 1 ? '' : 'es'}`;
+
+        // Lane Adaptation Log Table
+        if (st.lane_events && st.lane_events.length > 0) {
+          const listEl = document.getElementById('lane-history-list');
+          listEl.innerHTML = st.lane_events.map(ev => `
+            <div style="background: #0c1220; border: 1px solid var(--card-border); border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span style="font-weight: 700; color: #38bdf8;">Step ${ev.step.toLocaleString()}</span>: 
+                <span style="color: #94a3b8;">${ev.from_lane}</span> &rarr; <span style="color: #10b981; font-weight: 600;">${ev.to_lane}</span>
+                <span style="color: var(--text-muted); font-size: 11px; margin-left: 6px;">(${ev.reason})</span>
+              </div>
+              <span style="font-size: 11px; color: var(--text-muted);">${ev.time}</span>
+            </div>
+          `).reverse().join('');
+        }
+
         // Update Charts
         if (st.history_loss && st.history_loss.length > 0) {
           chartInstance.data.labels = st.history_loss.map(h => h.step);
@@ -931,21 +1182,42 @@ HTML_PAGE = """<!DOCTYPE html>
 
     async function runInference() {
       const prompt = document.getElementById('prompt-input').value.trim();
-      if (!prompt) return;
+      if (!prompt) {
+        alert('Please enter a prompt to generate text.');
+        return;
+      }
+      const tokens = parseInt(document.getElementById('tokens-input').value) || 100;
+      const temp = parseFloat(document.getElementById('temp-input').value) || 0.70;
+      const device = document.getElementById('infer-device').value;
+
       const btn = document.getElementById('btn-infer');
       const out = document.getElementById('infer-output');
+      const metaEl = document.getElementById('infer-meta');
+
       btn.disabled = true;
       btn.textContent = 'Generating...';
-      out.textContent = 'Executing inference using latest checkpoint weights...';
+      out.textContent = `Executing autoregressive inference (${tokens} tokens, Temp ${temp.toFixed(2)}) using latest checkpoint...`;
+      metaEl.style.display = 'none';
 
       try {
         const res = await fetch('/api/inference', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: prompt, temperature: 0.7, max_tokens: 80 })
+          body: JSON.stringify({
+            prompt: prompt,
+            temperature: temp,
+            max_tokens: tokens,
+            device: device,
+          })
         });
         const data = await res.json();
-        out.textContent = data.generated_text || data.error || 'No text generated.';
+        if (data.status === 'success' || data.generated_text) {
+          out.textContent = data.generated_text || 'No text returned.';
+          metaEl.textContent = `Generated ${data.tokens || tokens} tokens in ${data.elapsed_sec || '?'}s (${data.speed || '? tok/s'}) on ${data.device || 'CPU'}`;
+          metaEl.style.display = 'block';
+        } else {
+          out.textContent = data.error || 'Inference execution failed.';
+        }
       } catch (e) {
         out.textContent = `Inference failed: ${e}`;
       } finally {
@@ -1073,14 +1345,24 @@ class ControlCenterHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/inference":
             prompt = payload.get("prompt", "")
             temp = float(payload.get("temperature", 0.7))
-            tokens = int(payload.get("max_tokens", 80))
+            tokens = int(payload.get("max_tokens", 100))
+            top_k = int(payload.get("top_k", 40))
+            rep_pen = float(payload.get("repetition_penalty", 1.15))
+            dev = payload.get("device", "auto")
 
-            output = _run_inference_worker(prompt, temp, tokens)
+            result = _run_inference_worker(
+                prompt=prompt,
+                temperature=temp,
+                max_tokens=tokens,
+                top_k=top_k,
+                repetition_penalty=rep_pen,
+                device=dev,
+            )
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
-            self.wfile.write(json.dumps({"generated_text": output}).encode("utf-8"))
+            self.wfile.write(json.dumps(result).encode("utf-8"))
             return
 
         self.send_response(404)

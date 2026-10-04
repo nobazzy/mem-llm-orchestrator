@@ -8,19 +8,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
-
-# Configure Windows native SSL certificates & sanitize cert environment
-for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
-    _val = os.environ.get(_ca_env)
-    if _val and not os.path.exists(_val):
-        os.environ.pop(_ca_env, None)
+from typing import Any
 
 try:
-    import truststore
-    truststore.inject_into_ssl()
-    import urllib3.util.ssl_
-    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
+    import certifi
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 except Exception:
     pass
 
@@ -175,7 +170,9 @@ def main():
     if "token_embedding.weight" in model_state:
         d_model = model_state["token_embedding.weight"].shape[1]
         num_layers = len([k for k in model_state.keys() if k.endswith(".ln1.weight")])
-        if d_model == 640 and num_layers == 8:
+        if d_model == 512 and num_layers == 6:
+            detected_preset = "medium_50m"
+        elif d_model == 640 and num_layers == 8:
             detected_preset = "medium_75m"
         elif d_model == 768 and num_layers == 8:
             detected_preset = "medium_100m"
@@ -183,6 +180,10 @@ def main():
             detected_preset = "large_130m"
         elif d_model == 1024 and num_layers == 16:
             detected_preset = "xlarge_250m"
+        elif d_model == 1280 and num_layers == 18:
+            detected_preset = "xxlarge_400m"
+        elif d_model == 1280 and num_layers == 24:
+            detected_preset = "ultra_500m"
 
     detected_seq_len = 512 if "512" in lane else 256
     seq_len = args.seq_len if args.seq_len is not None else detected_seq_len
@@ -203,6 +204,7 @@ def main():
         encoded = [bos_id]
     input_ids = torch.tensor([encoded], dtype=torch.long, device=device)
     print("Generating text...\n" + "-"*70)
+    t_gen_start = time.perf_counter()
     out_ids = sample_generate(
         model=model,
         prompt_ids=input_ids,
@@ -213,7 +215,17 @@ def main():
         tokenizer=tokenizer,
         stream=True,
     )
+    t_gen_elapsed = max(1e-4, time.perf_counter() - t_gen_start)
+    gen_tokens_count = int(out_ids.size(1) - input_ids.size(1))
+    gen_speed = gen_tokens_count / t_gen_elapsed
     print("-"*70 + "\n")
+
+    # Clean decoded text marker for API consumers
+    full_decoded = tokenizer.decode(out_ids[0].tolist(), skip_special_tokens=True)
+    print(f"<<<GENERATION_META>>>: tokens={gen_tokens_count}, time={t_gen_elapsed:.2f}s, speed={gen_speed:.1f} tok/s")
+    print("<<<GENERATION_OUTPUT>>>")
+    print(full_decoded)
+    print("<<<END_GENERATION_OUTPUT>>>")
 
 
 if __name__ == "__main__":
