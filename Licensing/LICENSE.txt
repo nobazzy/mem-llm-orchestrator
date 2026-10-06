@@ -1,0 +1,35 @@
+ENVATO MARKET COMMERCIAL CODE LICENSE
+================================================================================
+
+This software is licensed for use under the standard terms and conditions of 
+the Envato Market (CodeCanyon) License Agreement:
+
+REGULAR LICENSE
+--------------------------------------------------------------------------------
+The Regular License grants you, the purchaser, an ongoing, non-exclusive, 
+worldwide license to make use of the digital work you have purchased.
+
+You are licensed to use the Item to create one single End Product for yourself 
+or for one client (a "single application"), and the End Product can be distributed 
+for Free. You cannot sell or re-distribute the Item as a standalone product.
+
+EXTENDED LICENSE
+--------------------------------------------------------------------------------
+The Extended License grants you an ongoing, non-exclusive, worldwide license to 
+make use of the digital work you have purchased to create one single End Product 
+for yourself or for one client, and the End Product may be Sold or distributed 
+as a paid commercial service (such as a SaaS, paid software product, or enterprise tool).
+
+RESTRICTIONS
+--------------------------------------------------------------------------------
+1. You cannot re-distribute the Item as stock, in a tool or template, or with 
+   source files to third parties.
+2. You cannot claim original intellectual property ownership over the base software.
+3. You must not permit an end user of the End Product to extract the Item and use 
+   it on a stand-alone basis.
+
+For full legal terms, visit:
+https://codecanyon.net/licenses/terms/regular
+https://codecanyon.net/licenses/terms/extended
+
+Copyright (c) MEM AI Systems. All rights reserved.

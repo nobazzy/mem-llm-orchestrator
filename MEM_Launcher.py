@@ -116,8 +116,8 @@ def main():
             # If client opened the dashboard and then closed all windows
             if session.has_ever_connected():
                 idle_seconds = time.time() - session.get_last_activity()
-                if idle_seconds > 25.0:
-                    print("[*] Inactivity detected (window closed). Terminating engine...")
+                if idle_seconds > 300.0:
+                    print("[*] Inactivity detected (window closed for >5 minutes). Terminating engine...")
                     break
     except KeyboardInterrupt:
         print("[*] Halted by user.")

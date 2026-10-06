@@ -1,0 +1,31 @@
+================================================================================
+  MEM LLM STUDIO — QUICKSTART GUIDE (CODECANYON COMMERCIAL RELEASE)
+================================================================================
+
+Thank you for purchasing MEM LLM Studio!
+
+3 STEPS TO GET STARTED:
+--------------------------------------------------------------------------------
+1. INSTALLATION:
+   Double-click "install.bat" (Windows) to automatically create the Python 
+   virtual environment and configure PyTorch with CUDA acceleration.
+
+2. LAUNCH STUDIO:
+   Double-click "start_studio.bat" to launch the native Desktop Studio.
+   The interface opens automatically at http://127.0.0.1:8089.
+
+3. START TRAINING:
+   - Select your Model Architecture (e.g., large_130m or ultra_500m).
+   - Choose your Dataset (FineWeb-Edu, SlimPajama, or Custom file).
+   - Click "Start Production Training" and watch live loss & throughput curves!
+
+DOCUMENTATION:
+--------------------------------------------------------------------------------
+Open "Documentation/index.html" in any browser for the complete user manual, 
+hardware compatibility matrix, Zero-OOM architecture guide, and REST API docs.
+
+SUPPORT & UPDATES:
+--------------------------------------------------------------------------------
+Need help or custom integrations? Contact via your Envato CodeCanyon account.
+Enjoy autonomous AI pre-training!
+================================================================================

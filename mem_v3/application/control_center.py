@@ -484,6 +484,114 @@ def _run_inference_worker(
         return {"status": "error", "error": f"Inference execution failed: {str(e)}"}
 
 
+def _export_model_worker(export_format: str = "safetensors") -> Dict[str, Any]:
+    """Exports latest trained checkpoint into standard deployment formats (SafeTensors + PyTorch)."""
+    try:
+        from runtime.checkpoint_manager import CheckpointManager
+        ckpt_mgr = CheckpointManager(root=_root / "checkpoints")
+        latest_ckpt = ckpt_mgr.latest_checkpoint_path()
+        if not latest_ckpt or not Path(latest_ckpt).exists():
+            return {"status": "error", "error": "No trained checkpoints found to export. Train the model for at least a few steps first."}
+
+        payload = ckpt_mgr.load_torch_checkpoint(latest_ckpt, map_location="cpu")
+        model_state = payload.get("model_state_dict", {})
+        meta = payload.get("metadata", {})
+        step = meta.get("step", 0)
+
+        # Detect architecture preset
+        d_model = 768
+        num_layers = 12
+        num_heads = 12
+        detected_preset = "large_130m"
+        if "token_embedding.weight" in model_state:
+            d_model = model_state["token_embedding.weight"].shape[1]
+            num_layers = len([k for k in model_state.keys() if k.endswith(".ln1.weight")])
+            if d_model == 512 and num_layers == 6:
+                detected_preset, num_heads = "medium_50m", 8
+            elif d_model == 640 and num_layers == 8:
+                detected_preset, num_heads = "medium_75m", 10
+            elif d_model == 768 and num_layers == 8:
+                detected_preset, num_heads = "medium_100m", 12
+            elif d_model == 768 and num_layers == 12:
+                detected_preset, num_heads = "large_130m", 12
+            elif d_model == 1024 and num_layers == 16:
+                detected_preset, num_heads = "xlarge_250m", 16
+            elif d_model == 1280 and num_layers == 18:
+                detected_preset, num_heads = "xxlarge_400m", 20
+            elif d_model == 1280 and num_layers == 24:
+                detected_preset, num_heads = "ultra_500m", 20
+
+        export_dir = _root / "exports" / f"model_step_{step}_{detected_preset}"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Save PyTorch state dict
+        pt_path = export_dir / "pytorch_model.bin"
+        torch.save(model_state, pt_path)
+
+        # 2. Save Safetensors if available
+        safetensors_saved = False
+        try:
+            from safetensors.torch import save_file
+            st_path = export_dir / "model.safetensors"
+            st_state = {k: v.contiguous().clone().cpu() for k, v in model_state.items()}
+            save_file(st_state, str(st_path))
+            safetensors_saved = True
+        except Exception:
+            pass
+
+        # 3. Save config.json
+        config_data = {
+            "architectures": ["MEMCausalLM"],
+            "model_type": "mem-causal-lm",
+            "preset": detected_preset,
+            "d_model": d_model,
+            "num_layers": num_layers,
+            "num_heads": num_heads,
+            "vocab_size": 50257,
+            "max_position_embeddings": 256,
+            "step": step,
+            "loss": meta.get("loss", None),
+            "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        (export_dir / "config.json").write_text(json.dumps(config_data, indent=2), encoding="utf-8")
+
+        # 4. Save Quickstart README in export folder
+        readme_content = f"""# Exported MEM Model — Step {step}
+Preset: {detected_preset} ({d_model} hidden size, {num_layers} layers)
+
+## How to Load in Python:
+```python
+import torch
+from mem_v3.runtime.lm_model import build_tiny_causal_lm
+
+# Initialize model architecture
+model = build_tiny_causal_lm(vocab_size=50257, seq_len=256, preset="{detected_preset}")
+
+# Load weights
+weights = torch.load("pytorch_model.bin", map_location="cpu")
+model.load_state_dict(weights)
+model.eval()
+print("Model loaded successfully!")
+```
+"""
+        (export_dir / "README.md").write_text(readme_content, encoding="utf-8")
+
+        file_size_mb = pt_path.stat().st_size / (1024 ** 2)
+        session.log(f"Model exported successfully to: {export_dir.name} ({file_size_mb:.1f} MB)")
+        return {
+            "status": "success",
+            "export_dir": str(export_dir),
+            "folder_name": export_dir.name,
+            "step": step,
+            "preset": detected_preset,
+            "size_mb": round(file_size_mb, 1),
+            "safetensors": safetensors_saved,
+        }
+    except Exception as e:
+        session.log(f"Export error: {str(e)}")
+        return {"status": "error", "error": f"Model export failed: {str(e)}"}
+
+
 # Production HTML5/CSS3 Dashboard - 100% in English
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -708,6 +816,18 @@ HTML_PAGE = """<!DOCTYPE html>
         <button class="btn btn-danger" id="btn-stop" onclick="stopTraining()" style="flex: 1;" disabled>
           Pause &amp; Save
         </button>
+      </div>
+
+      <!-- 8. MODEL EXPORT & PACKAGING -->
+      <div style="border-top: 1px solid var(--card-border); padding-top: 14px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Model Export &amp; Packaging</span>
+          <span style="font-size: 10px; color: var(--cyan); font-weight: 600;">SafeTensors + PyTorch</span>
+        </div>
+        <button class="btn btn-secondary" id="btn-export" onclick="exportModel()" style="padding: 10px; font-size: 13px; border-color: rgba(6, 182, 212, 0.4);">
+          Export Trained Checkpoint
+        </button>
+        <div id="export-status" style="font-size: 11px; display: none; padding: 10px; border-radius: 6px; background: #040810; border: 1px solid var(--card-border); line-height: 1.5;"></div>
       </div>
     </div>
 
@@ -1244,6 +1364,38 @@ HTML_PAGE = """<!DOCTYPE html>
         `;
         setTimeout(() => { window.close(); }, 1500);
       }
+    async function exportModel() {
+      const btn = document.getElementById('btn-export');
+      const status = document.getElementById('export-status');
+      btn.disabled = true;
+      btn.textContent = 'Packaging Model...';
+      status.style.display = 'block';
+      status.style.color = '#38bdf8';
+      status.textContent = 'Extracting checkpoint weights and building deployment package...';
+
+      try {
+        const res = await fetch('/api/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ format: 'safetensors' })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          status.style.color = '#10b981';
+          status.innerHTML = `<strong>Export Complete!</strong><br>` +
+            `<span style="color: #94a3b8;">Preset: <b>${data.preset}</b> | Step: <b>${data.step}</b> | Size: <b>${data.size_mb} MB</b></span><br>` +
+            `<span style="color: #cbd5e1; word-break: break-all; font-family: monospace; font-size: 10px;">Path: ${data.export_dir}</span>`;
+        } else {
+          status.style.color = '#ef4444';
+          status.textContent = data.error || 'Export failed.';
+        }
+      } catch (e) {
+        status.style.color = '#ef4444';
+        status.textContent = 'Connection error during export: ' + e;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Export Trained Checkpoint';
+      }
     }
 
     window.onload = () => {
@@ -1363,6 +1515,15 @@ class ControlCenterHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/export":
+            export_format = payload.get("format", "safetensors")
+            export_result = _export_model_worker(export_format)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(export_result).encode("utf-8"))
             return
 
         self.send_response(404)

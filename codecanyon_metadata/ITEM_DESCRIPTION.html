@@ -1,0 +1,101 @@
+<h2>MEM LLM Studio — Turnkey Local AI Pre-Training, Autonomous Memory Orchestration &amp; Real-Time Control Center</h2>
+
+<p><strong>MEM LLM Studio</strong> is a production-grade, standalone AI training suite and visual control center that allows anyone to train, fine-tune, monitor, and deploy custom Large Language Models (LLMs) locally on consumer hardware without Out-Of-Memory (OOM) crashes.</p>
+
+<p>Powered by our proprietary <strong>Autonomous Dynamic Lane Switching Engine</strong>, MEM continuously monitors GPU VRAM pressure and dynamically throttles micro-batch sizes, gradient accumulation, and context windows in real-time — guaranteeing <strong>100% Zero-OOM stability</strong> even on standard 6GB and 8GB NVIDIA GPUs (RTX 3060, 4060, 5060 Ti, and higher).</p>
+
+<hr>
+
+<h3>Key Features at a Glance</h3>
+<ul>
+  <li><strong>Autonomous Zero-OOM Governance:</strong> Intelligent lane switching engine prevents GPU memory crashes during heavy training spikes.</li>
+  <li><strong>6 Production Model Presets:</strong> Pre-calibrated architectures ready out-of-the-box: 50M, 75M, 130M, 250M, 400M, and 540M parameters.</li>
+  <li><strong>Zero Disk Download Dataset Streaming:</strong> Real-time streaming from Hugging Face (FineWeb-Edu, SlimPajama, TinyStories) or custom local files (.jsonl, .txt, .csv).</li>
+  <li><strong>Live Interactive Control Studio:</strong> Sleek dark-mode dashboard with real-time Loss, Throughput (tok/s), VRAM gauge, and Lane transition history.</li>
+  <li><strong>Interactive Inference Playground:</strong> Autoregressively test your trained checkpoints on the fly with adjustable temperature, token length, and device routing.</li>
+  <li><strong>1-Click Model Export:</strong> Export trained checkpoints into standard Hugging Face SafeTensors (.safetensors) and PyTorch (.bin) formats with a single click.</li>
+  <li><strong>Dual-Mode Execution:</strong> Run as a standalone Windows desktop app (with native WebView) or access remotely via any web browser.</li>
+  <li><strong>Full REST API:</strong> Complete programmatic endpoints (/api/state, /api/start, /api/stop, /api/inference, /api/export) to easily connect with your own SaaS, frontend, or automation pipeline.</li>
+</ul>
+
+<hr>
+
+<h3>Why Buyers Choose MEM LLM Studio</h3>
+<p>Cloud GPU training services (AWS, Lambda Labs, RunPod) cost hundreds of dollars every month. MEM LLM Studio turns your everyday workstation or gaming PC into an autonomous AI training lab. Train proprietary domain-specific LLMs completely offline with total privacy and zero recurring cloud bills.</p>
+
+<hr>
+
+<h3>Supported Hardware &amp; Compatibility</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Model Architecture</th>
+      <th>Parameter Count</th>
+      <th>Required VRAM</th>
+      <th>Recommended GPUs</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>medium_50m</td>
+      <td>50 Million</td>
+      <td>2 GB - 4 GB</td>
+      <td>GTX 1660, RTX 2060, RTX 3050, or CPU</td>
+    </tr>
+    <tr>
+      <td>medium_75m</td>
+      <td>75 Million</td>
+      <td>4 GB - 6 GB</td>
+      <td>RTX 2060, RTX 3060 Laptop</td>
+    </tr>
+    <tr>
+      <td>large_130m</td>
+      <td>130 Million</td>
+      <td>6 GB - 8 GB</td>
+      <td>RTX 3060, RTX 4060, RTX 5060 Ti</td>
+    </tr>
+    <tr>
+      <td>xlarge_250m</td>
+      <td>250 Million</td>
+      <td>8 GB</td>
+      <td>RTX 4060 Ti, RTX 3070, RTX 5060 Ti</td>
+    </tr>
+    <tr>
+      <td>xxlarge_400m</td>
+      <td>420 Million</td>
+      <td>8 GB - 12 GB</td>
+      <td>RTX 4070, RTX 5060 Ti (8GB/16GB)</td>
+    </tr>
+    <tr>
+      <td>ultra_500m</td>
+      <td>540 Million</td>
+      <td>8 GB - 16 GB</td>
+      <td>RTX 4080, RTX 3090, RTX 4090, RTX 5060 Ti</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h3>What is Included in the Download Package?</h3>
+<ul>
+  <li>Full Python and C# Desktop source code with clean architecture.</li>
+  <li>Automated 1-Click Windows Environment Installer (install.bat).</li>
+  <li>1-Click Desktop Studio Launcher (start_studio.bat).</li>
+  <li>Native Windows Desktop Application executable (MEM_Desktop.exe).</li>
+  <li>Complete interactive HTML documentation portal (Documentation/index.html).</li>
+  <li>Pre-calibrated model architectures with Flash Attention (SDPA) and Rotary Embeddings.</li>
+  <li>SafeTensors and PyTorch model export module.</li>
+  <li>Commercial License terms.</li>
+</ul>
+
+<hr>
+
+<h3>System Requirements</h3>
+<ul>
+  <li><strong>Operating System:</strong> Windows 10/11 (64-bit), Linux (Ubuntu/Debian), or WSL2.</li>
+  <li><strong>Processor:</strong> Intel Core i5/i7/i9 or AMD Ryzen 5/7/9.</li>
+  <li><strong>Memory:</strong> 16 GB RAM recommended (8 GB minimum).</li>
+  <li><strong>Graphics:</strong> NVIDIA GeForce GTX/RTX GPU with CUDA support (or CPU fallback).</li>
+  <li><strong>Software:</strong> Python 3.10, 3.11, or 3.12 (auto-configured by install.bat).</li>
+</ul>

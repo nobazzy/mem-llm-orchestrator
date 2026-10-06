@@ -49,3 +49,5 @@ htmlcov/
 *.tar.gz
 
 evidence_packets/
+mem_v3/exports/
+dataset_cache/

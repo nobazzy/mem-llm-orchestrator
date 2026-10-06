@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MEM LLM Studio — Commercial Documentation &amp; User Manual</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --sidebar-bg: #0f172a;
+      --card-bg: #111827;
+      --card-border: #1f293d;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #10b981;
+      --cyan: #06b6d4;
+      --yellow: #f59e0b;
+      --purple: #8b5cf6;
+      --code-bg: #050811;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); display: flex; min-height: 100vh; line-height: 1.6; }
+    
+    /* SIDEBAR */
+    aside { width: 300px; background-color: var(--sidebar-bg); border-right: 1px solid var(--card-border); padding: 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto; flex-shrink: 0; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .brand-logo { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--cyan)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 18px; }
+    .brand-title { font-size: 16px; font-weight: 700; color: #fff; }
+    .brand-ver { font-size: 11px; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .nav-group { margin-bottom: 20px; }
+    .nav-header { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); font-weight: 700; margin-bottom: 8px; }
+    .nav-links { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .nav-links a { display: block; color: #cbd5e1; text-decoration: none; font-size: 13px; padding: 6px 10px; border-radius: 6px; transition: all 0.2s; }
+    .nav-links a:hover { background-color: rgba(255, 255, 255, 0.05); color: #fff; }
+    .nav-links a.active { background: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 600; }
+
+    /* CONTENT */
+    main { flex: 1; padding: 40px 60px; max-width: 1100px; overflow-y: auto; }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -1px; margin-bottom: 12px; color: #fff; }
+    h2 { font-size: 22px; font-weight: 700; margin-top: 40px; margin-bottom: 16px; color: #fff; border-bottom: 1px solid var(--card-border); padding-bottom: 8px; }
+    h3 { font-size: 16px; font-weight: 600; margin-top: 24px; margin-bottom: 10px; color: #38bdf8; }
+    p { margin-bottom: 14px; color: #cbd5e1; font-size: 14.5px; }
+    ul, ol { margin-left: 24px; margin-bottom: 16px; font-size: 14.5px; color: #cbd5e1; }
+    li { margin-bottom: 6px; }
+
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .badge-green { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-blue { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+
+    .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; padding: 20px; margin: 18px 0; }
+    .callout { border-left: 4px solid var(--cyan); background: rgba(6, 182, 212, 0.08); padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+    .callout-success { border-color: var(--accent); background: rgba(16, 185, 129, 0.08); }
+    .callout-warning { border-color: var(--yellow); background: rgba(245, 158, 11, 0.08); }
+
+    table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px; }
+    th { background: #0c1220; text-align: left; padding: 12px; border: 1px solid var(--card-border); font-weight: 700; color: #fff; }
+    td { padding: 10px 12px; border: 1px solid var(--card-border); color: #cbd5e1; }
+    tr:nth-child(even) { background-color: rgba(255, 255, 255, 0.02); }
+
+    pre { background: var(--code-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 14px 0; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; color: #e2e8f0; line-height: 1.5; }
+    code { font-family: 'Consolas', 'Courier New', monospace; font-size: 12.5px; background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 4px; color: #38bdf8; }
+
+    .endpoint { display: flex; align-items: center; gap: 10px; margin-top: 14px; margin-bottom: 6px; }
+    .method-get { background: rgba(16, 185, 129, 0.2); color: #34d399; font-weight: 800; font-size: 11px; padding: 4px 8px; border-radius: 4px; }
+    .method-post { background: rgba(6, 182, 212, 0.2); color: #38bdf8; font-weight: 800; font-size: 11px; padding: 4px 8px; border-radius: 4px; }
+    .endpoint-path { font-family: monospace; font-weight: 700; font-size: 14px; color: #fff; }
+  </style>
+</head>
+<body>
+
+  <!-- SIDEBAR NAVIGATION -->
+  <aside>
+    <div class="brand">
+      <div class="brand-logo">M</div>
+      <div>
+        <div class="brand-title">MEM LLM Studio</div>
+        <div class="brand-ver">v3.0.0 Commercial Release</div>
+      </div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-header">Getting Started</div>
+      <ul class="nav-links">
+        <li><a href="#overview">1. Product Overview</a></li>
+        <li><a href="#requirements">2. System Requirements</a></li>
+        <li><a href="#installation">3. One-Click Installation</a></li>
+        <li><a href="#launching">4. Launching the Studio</a></li>
+      </ul>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-header">Core Capabilities</div>
+      <ul class="nav-links">
+        <li><a href="#training">5. Training LLMs</a></li>
+        <li><a href="#zero-oom">6. Zero-OOM Engine</a></li>
+        <li><a href="#telemetry">7. Real-Time Telemetry</a></li>
+        <li><a href="#playground">8. Inference Playground</a></li>
+        <li><a href="#export">9. Model Export &amp; Packaging</a></li>
+      </ul>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-header">Integration &amp; Reference</div>
+      <ul class="nav-links">
+        <li><a href="#api">10. REST API Reference</a></li>
+        <li><a href="#troubleshooting">11. Troubleshooting &amp; FAQ</a></li>
+        <li><a href="#licensing">12. Commercial License</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- MAIN DOCUMENTATION CONTENT -->
+  <main>
+    <h1>MEM LLM Studio — Documentation</h1>
+    <p>Welcome to the official user and developer manual for <strong>MEM LLM Studio</strong>. This turnkey platform enables autonomous local pre-training, fine-tuning, real-time telemetry monitoring, and interactive inference testing for Large Language Models directly on consumer NVIDIA GPUs and standard hardware.</p>
+
+    <!-- SECTION 1 -->
+    <h2 id="overview">1. Product Overview &amp; Key Features</h2>
+    <p>MEM LLM Studio solves the single biggest hurdle in local AI development: <strong>Out-Of-Memory (OOM) crashes</strong>. Traditional training scripts fail when GPU memory exceeds capacity. MEM utilizes an <em>Autonomous Dynamic Lane Switching Engine</em> that continuously monitors VRAM headroom and adjusts batch size, gradient accumulation, and context windows dynamically to ensure uninterrupted execution.</p>
+    
+    <div class="card">
+      <h3 style="margin-top:0;">Key Feature Highlights:</h3>
+      <ul>
+        <li><strong>Turnkey Zero-OOM Architecture:</strong> Dynamic lane promotion and demotion keeps VRAM safely bounded below hardware limits.</li>
+        <li><strong>Pre-Configured Architecture Presets:</strong> Ready-to-train causal transformer models ranging from 50M, 75M, 130M, 250M, 400M, up to 540M parameters.</li>
+        <li><strong>Streaming Dataset Integration:</strong> Direct streaming from Hugging Face datasets (FineWeb-Edu, SlimPajama, TinyStories) or custom local files (.txt, .jsonl, .csv) with zero multi-gigabyte disk pre-downloads.</li>
+        <li><strong>Dual-Mode Visual Studio:</strong> Runs as a standalone Windows desktop app (via Chromium/Edge WebView) or accessible in any modern web browser.</li>
+        <li><strong>Interactive Inference Playground:</strong> Test generated checkpoints instantly with real-time temperature, token limits, device selection, and copy-to-clipboard.</li>
+        <li><strong>1-Click Model Exporter:</strong> Export trained weights into industry-standard SafeTensors (.safetensors) and PyTorch (.bin) formats with HuggingFace config.json.</li>
+      </ul>
+    </div>
+
+    <!-- SECTION 2 -->
+    <h2 id="requirements">2. System Requirements &amp; Hardware Compatibility</h2>
+    <p>MEM LLM Studio is designed to run efficiently on standard consumer workstations, gaming PCs, and dedicated AI rigs.</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Model Preset</th>
+          <th>Parameters</th>
+          <th>Recommended VRAM</th>
+          <th>Compatible GPUs</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>medium_50m</strong></td>
+          <td>50M Params</td>
+          <td>2 GB - 4 GB</td>
+          <td>GTX 1660, RTX 2060, RTX 3050, or CPU</td>
+        </tr>
+        <tr>
+          <td><strong>medium_75m</strong></td>
+          <td>75M Params</td>
+          <td>4 GB - 6 GB</td>
+          <td>RTX 2060, RTX 3060 Laptop, GTX 1080</td>
+        </tr>
+        <tr>
+          <td><strong>large_130m</strong></td>
+          <td>130M Params</td>
+          <td>6 GB - 8 GB</td>
+          <td>RTX 3060 (12GB/8GB), RTX 4060, RTX 5060 Ti</td>
+        </tr>
+        <tr>
+          <td><strong>xlarge_250m</strong></td>
+          <td>250M Params</td>
+          <td>8 GB</td>
+          <td>RTX 4060 Ti (8GB/16GB), RTX 5060 Ti, RTX 3070</td>
+        </tr>
+        <tr>
+          <td><strong>xxlarge_400m</strong></td>
+          <td>420M Params</td>
+          <td>8 GB - 12 GB</td>
+          <td>RTX 4070, RTX 5060 Ti, RTX 3080</td>
+        </tr>
+        <tr>
+          <td><strong>ultra_500m</strong></td>
+          <td>540M Params</td>
+          <td>8 GB - 16 GB</td>
+          <td>RTX 5060 Ti, RTX 4080, RTX 3090, RTX 4090</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- SECTION 3 -->
+    <h2 id="installation">3. One-Click Installation</h2>
+    <p>We provide an automated installation script that prepares the entire Python virtual environment and installs PyTorch with CUDA acceleration automatically.</p>
+
+    <h3>Windows Automated Setup:</h3>
+    <ol>
+      <li>Extract the purchased ZIP file to your preferred directory.</li>
+      <li>Double-click <code>install.bat</code>.</li>
+      <li>The script will automatically:
+        <ul>
+          <li>Verify Python 3.10+ is installed.</li>
+          <li>Create a clean virtual environment in <code>mem_v3\.venv</code>.</li>
+          <li>Detect your NVIDIA GPU and install PyTorch with CUDA 12.1.</li>
+          <li>Install required dependencies (safetensors, transformers, datasets, psutil, certifi).</li>
+        </ul>
+      </li>
+      <li>When installation completes, press any key to finish.</li>
+    </ol>
+
+    <div class="callout callout-success">
+      <strong>Linux / WSL Setup:</strong> If running on Ubuntu/Debian, simply run:<br>
+      <code>python3 -m venv mem_v3/.venv && source mem_v3/.venv/bin/activate && pip install -r mem_v3/requirements.txt</code>
+    </div>
+
+    <!-- SECTION 4 -->
+    <h2 id="launching">4. Launching the Studio</h2>
+    <p>You can launch the Studio in two different ways:</p>
+    <ul>
+      <li><strong>Double-click <code>start_studio.bat</code>:</strong> Opens the application directly in a dedicated desktop window without browser URL bars.</li>
+      <li><strong>Command Line:</strong> Run <code>python MEM_Launcher.py</code> and navigate your browser to <code>http://127.0.0.1:8089</code>.</li>
+    </ul>
+
+    <!-- SECTION 5 -->
+    <h2 id="training">5. Training LLMs (Step-by-Step Guide)</h2>
+    <ol>
+      <li><strong>Select Architecture:</strong> In the left configuration panel, choose your target parameter size (e.g. <code>large_130m</code> or <code>ultra_500m</code>).</li>
+      <li><strong>Select Dataset:</strong> Choose from curated high-quality datasets like <em>HuggingFaceFW/fineweb-edu</em>, <em>DKYoon/SlimPajama-6B</em>, or pick <em>Custom</em> to provide your own local text/JSONL file.</li>
+      <li><strong>Set Target Steps:</strong> Specify the number of steps (e.g. 10,000 to 100,000 steps).</li>
+      <li><strong>Select Initial Lane:</strong> Leave on <em>Aggressive Throughput</em> (default) — the autonomous governor will adjust if needed.</li>
+      <li><strong>Checkpoints:</strong> Keep <em>Resume from Latest Checkpoint</em> enabled to continue where you left off, or check <em>Clean Start</em> to archive old checkpoints and start fresh.</li>
+      <li>Click <strong>Start Production Training</strong>.</li>
+    </ol>
+
+    <!-- SECTION 6 -->
+    <h2 id="zero-oom">6. Autonomous Zero-OOM Engine (How it Works)</h2>
+    <p>MEM features an integrated <code>AdaptiveLaneRunner</code> governor. During execution:</p>
+    <ul>
+      <li><strong>Continuous VRAM Surveillance:</strong> Checks physical memory utilization every training window.</li>
+      <li><strong>Dynamic Demotion:</strong> If allocated memory exceeds safe ceiling thresholds (e.g. >5.8 GB on 8 GB cards), the engine automatically downshifts to a safer lane with lower micro-batch size and higher gradient accumulation steps.</li>
+      <li><strong>Dynamic Promotion:</strong> When throughput is stable and memory headroom is plentiful for 3 consecutive windows, the engine shifts up to maximize tokens/second.</li>
+      <li><strong>WDDM Defragmentation:</strong> Proactively triggers cache purging to eliminate Windows driver allocation bloat.</li>
+    </ul>
+
+    <!-- SECTION 7 -->
+    <h2 id="telemetry">7. Real-Time Telemetry &amp; Analytics</h2>
+    <p>The Studio features 7 live KPI cards updating every 1,000ms:</p>
+    <ul>
+      <li><strong>Global Step:</strong> Current progress and percentage bar.</li>
+      <li><strong>Training Loss &amp; Validation Loss:</strong> Real-time convergence metrics.</li>
+      <li><strong>Throughput:</strong> Processed tokens per second (tok/s) and steps per second.</li>
+      <li><strong>VRAM Allocation:</strong> Exact megabytes in use and hardware safety percentage.</li>
+      <li><strong>Active Lane:</strong> Current operating mode badge and calculated ETA.</li>
+      <li><strong>Lane Transitions:</strong> Number of autonomous lane switches performed.</li>
+    </ul>
+
+    <!-- SECTION 8 -->
+    <h2 id="playground">8. Interactive Inference Playground</h2>
+    <p>Verify your trained model's generation quality in real-time:</p>
+    <ul>
+      <li><strong>Custom Prompt:</strong> Enter any prompt or use quick presets (Story, AI Future, Physics).</li>
+      <li><strong>Max Tokens Slider:</strong> Configure generation length from 10 up to 2,048 tokens.</li>
+      <li><strong>Temperature Slider:</strong> Adjust sampling randomness from 0.05 (deterministic) to 2.0 (creative).</li>
+      <li><strong>Inference Device:</strong> Choose <em>Auto</em> (safely uses CPU if training is running, or GPU if training is paused).</li>
+      <li><strong>Copy to Clipboard:</strong> Copy generated output with one click.</li>
+    </ul>
+
+    <!-- SECTION 9 -->
+    <h2 id="export">9. Model Export &amp; Packaging</h2>
+    <p>Click <strong>Export Trained Checkpoint</strong> in the Studio to package your model for distribution. The exporter produces an <code>exports/model_step_XXXX/</code> directory containing:</p>
+    <ul>
+      <li><code>model.safetensors</code>: High-speed zero-copy Safetensors weights.</li>
+      <li><code>pytorch_model.bin</code>: Standard PyTorch state dictionary.</li>
+      <li><code>config.json</code>: Complete architecture configuration (hidden size, layers, heads, vocab).</li>
+      <li><code>README.md</code>: Example Python code to load the model in external applications.</li>
+    </ul>
+
+    <!-- SECTION 10 -->
+    <h2 id="api">10. REST API Reference</h2>
+    <p>Integrate MEM LLM Studio into external dashboards, scripts, or client applications:</p>
+
+    <div class="endpoint">
+      <span class="method-get">GET</span>
+      <span class="endpoint-path">/api/state</span>
+    </div>
+    <p>Returns the complete live training telemetry, active step, loss history, and lane status.</p>
+
+    <div class="endpoint">
+      <span class="method-get">GET</span>
+      <span class="endpoint-path">/api/hardware</span>
+    </div>
+    <p>Returns GPU model name, total VRAM, allocated VRAM, CPU count, and free RAM.</p>
+
+    <div class="endpoint">
+      <span class="method-post">POST</span>
+      <span class="endpoint-path">/api/start</span>
+    </div>
+    <p>Starts a training job with JSON configuration:</p>
+    <pre><code>{
+  "model_preset": "large_130m",
+  "dataset": "HuggingFaceFW/fineweb-edu",
+  "steps": 25000,
+  "start_lane": "aggressive_seq256_zero0_gacc4",
+  "checkpoint_interval": 1000,
+  "resume_latest": true
+}</code></pre>
+
+    <div class="endpoint">
+      <span class="method-post">POST</span>
+      <span class="endpoint-path">/api/inference</span>
+    </div>
+    <p>Runs model generation on the latest checkpoint:</p>
+    <pre><code>{
+  "prompt": "The future of autonomous computing",
+  "temperature": 0.7,
+  "max_tokens": 120,
+  "device": "auto"
+}</code></pre>
+
+    <div class="endpoint">
+      <span class="method-post">POST</span>
+      <span class="endpoint-path">/api/export</span>
+    </div>
+    <p>Exports the latest checkpoint to SafeTensors and PyTorch format.</p>
+
+    <!-- SECTION 11 -->
+    <h2 id="troubleshooting">11. Troubleshooting &amp; FAQ</h2>
+    <div class="callout callout-warning">
+      <strong>Q: Port 8089 is already in use by another application.</strong><br>
+      A: MEM Studio automatically tries backup ports (8090, 8080, 8888) if 8089 is unavailable. The terminal prints the exact allocated URL.
+    </div>
+    <div class="callout">
+      <strong>Q: Windows socket error [WinError 10038] during streaming.</strong><br>
+      A: MEM Studio is equipped with native <code>certifi</code> certificate injection that prevents Windows socket handles from getting closed prematurely.
+    </div>
+
+    <!-- SECTION 12 -->
+    <h2 id="licensing">12. Commercial License &amp; Terms</h2>
+    <p>This software is distributed under the Envato CodeCanyon Commercial License:</p>
+    <ul>
+      <li><strong>Regular License:</strong> Use for 1 personal or commercial project. End users cannot be charged directly for the software itself.</li>
+      <li><strong>Extended License:</strong> Use for 1 commercial project where end users can be charged (SaaS, paid training platform, client delivery).</li>
+    </ul>
+    <p style="margin-top: 24px; font-size: 13px; color: var(--text-muted);">&copy; MEM AI Systems. All rights reserved.</p>
+  </main>
+
+</body>
+</html>
