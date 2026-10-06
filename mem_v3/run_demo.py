@@ -19,19 +19,25 @@ _script_dir = Path(__file__).resolve().parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
-# Configure Windows native SSL certificates & sanitize cert environment
+# Configure robust cross-platform SSL certificates & sanitize cert environment
 for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
     _val = os.environ.get(_ca_env)
     if _val and not os.path.exists(_val):
         os.environ.pop(_ca_env, None)
 
 try:
-    import truststore
-    truststore.inject_into_ssl()
-    import urllib3.util.ssl_
-    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
+    import certifi
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 except Exception:
     pass
+
+if sys.platform == "win32":
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
 
 try:
     if hasattr(sys.stdout, "reconfigure"):
@@ -56,7 +62,7 @@ def main():
         description="MEM Orchestrator 1-Click Interactive Demo (Adaptive Lane Runner & Zero-OOM Guard)"
     )
     parser.add_argument("--steps", type=int, default=200, help="Number of demo training steps (default: 200)")
-    parser.add_argument("--model-preset", default="medium_75m", choices=["medium_75m", "large_130m", "xlarge_250m"], help="Model preset (default: medium_75m)")
+    parser.add_argument("--model-preset", default="medium_75m", choices=["ultra_500m", "xxlarge_400m", "xlarge_250m", "large_130m", "medium_100m", "medium_75m", "medium_50m", "tiny_15m"], help="Model preset (default: medium_75m)")
     parser.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu", help="Dataset name")
     parser.add_argument("--dataset-config", default="sample-10BT", help="Dataset configuration")
     parser.add_argument("--shock-interval", type=int, default=60, help="Steps between chaos memory shocks (default: 60)")
@@ -73,7 +79,7 @@ def main():
     vram_gb = (torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)) if has_cuda else 0.0
 
     print("\n" + "=" * 80)
-    print(f"{BOLD}{CYAN}  🚀 MEM LLM ORCHESTRATOR — 1-CLICK INTERACTIVE DEMO{RESET}")
+    print(f"{BOLD}{CYAN}  [DEMO] MEM LLM ORCHESTRATOR -- 1-CLICK INTERACTIVE DEMO{RESET}")
     print(f"  {BOLD}Autonomous GPU Memory Modulation, Dynamic Lane Switching & Zero-OOM Defense{RESET}")
     print("=" * 80)
     print(f"  Hardware:      {BOLD}{device_name}{RESET} ({vram_gb:.1f} GB VRAM)" if has_cuda else f"  Hardware:      {BOLD}CPU{RESET}")

@@ -14,19 +14,25 @@ import threading
 import time
 from pathlib import Path
 
-# Configure Windows native SSL certificates & sanitize cert environment
+# Configure robust cross-platform SSL certificates & sanitize cert environment
 for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
     _val = os.environ.get(_ca_env)
     if _val and not os.path.exists(_val):
         os.environ.pop(_ca_env, None)
 
 try:
-    import truststore
-    truststore.inject_into_ssl()
-    import urllib3.util.ssl_
-    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
+    import certifi
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 except Exception:
     pass
+
+if sys.platform == "win32":
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
 
 try:
     if hasattr(sys.stdout, "reconfigure"):
@@ -55,7 +61,7 @@ RESET = "\033[0m"
 def main():
     parser = argparse.ArgumentParser(description="MEM Live Demo with Real-Time Terminal Telemetry & Zero-OOM Guard")
     parser.add_argument("--steps", type=int, default=300, help="Total steps to train (default: 300)")
-    parser.add_argument("--model-preset", default="xlarge_250m", choices=["xlarge_250m", "large_130m", "medium_75m"], help="Model preset")
+    parser.add_argument("--model-preset", default="xlarge_250m", choices=["ultra_500m", "xxlarge_400m", "xlarge_250m", "large_130m", "medium_100m", "medium_75m", "medium_50m", "tiny_15m"], help="Model preset")
     parser.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu", help="Dataset name")
     parser.add_argument("--dataset-config", default="sample-10BT", help="Dataset configuration")
     parser.add_argument("--fallback-dataset", default="roneneldan/TinyStories", help="Fallback dataset")

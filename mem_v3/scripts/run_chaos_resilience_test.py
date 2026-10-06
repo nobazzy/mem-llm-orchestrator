@@ -9,19 +9,25 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Configure Windows native SSL certificates & sanitize cert environment
+# Configure robust cross-platform SSL certificates & sanitize cert environment
 for _ca_env in ("CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE"):
     _val = os.environ.get(_ca_env)
     if _val and not os.path.exists(_val):
         os.environ.pop(_ca_env, None)
 
 try:
-    import truststore
-    truststore.inject_into_ssl()
-    import urllib3.util.ssl_
-    urllib3.util.ssl_.create_urllib3_context = truststore.SSLContext
+    import certifi
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 except Exception:
     pass
+
+if sys.platform == "win32":
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
 
 _root = str(Path(__file__).resolve().parent.parent)
 if _root not in sys.path:

@@ -195,7 +195,12 @@ def main():
         preset=detected_preset,
     ).to(device)
 
-    model.load_state_dict(model_state)
+    try:
+        model.load_state_dict(model_state)
+    except Exception as e:
+        print(f"\n[ERROR] Failed to load checkpoint weights into architecture '{detected_preset}': {e}")
+        print("Tip: If you previously trained with a different model preset (e.g. 75M vs 250M), please delete older checkpoints in checkpoints/ or specify the matching architecture with --model-preset.\n")
+        return
     model.eval()
 
     encoded = tokenizer.encode(args.prompt) if args.prompt else []
