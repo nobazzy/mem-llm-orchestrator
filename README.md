@@ -3,7 +3,7 @@
 [![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20(CUDA%20%2B%20CPU)-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Zero--OOM-00599C)](https://www.deepspeed.ai/)
-[![Tests](https://img.shields.io/badge/Tests-51%2F51%20Passing-brightgreen)](mem_v3/tests/)
+[![Tests](https://img.shields.io/badge/Tests-54%2F54%20Passing-brightgreen)](mem_v3/tests/)
 [![Validation](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps%20Zero--OOM-brightgreen)](mem_v3/EVALUATION.md)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20DDD-blue)](#system-architecture)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](mem_v3/LICENSE)

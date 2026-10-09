@@ -107,10 +107,13 @@ class PyTorchNativeRunner:
             "loaded_model": False,
             "loaded_optimizer": False,
             "loaded_rng": False,
+            "loaded_dataset_state": False,
             "resumed_step": 0,
+            "resumed_tokens": 0,
             "error": "",
         }
         resumed_step_start = 0
+        resumed_tokens_start = 0
         if checkpoint_resume["requested"] and self.checkpoint_manager:
             try:
                 ckpt_path = checkpoint_resume["path"]
@@ -168,6 +171,18 @@ class PyTorchNativeRunner:
                 checkpoint_resume["metadata"] = meta
                 resumed_step_start = int(meta.get("step") or meta.get("global_step") or meta.get("micro_train_steps_completed") or 0)
                 checkpoint_resume["resumed_step"] = resumed_step_start
+                resumed_tokens_start = int(meta.get("tokens_processed", 0))
+                checkpoint_resume["resumed_tokens"] = resumed_tokens_start
+
+                # Restore dataset / batcher position if available
+                dataset_state = payload.get("dataset_state_dict") or meta.get("dataset_state")
+                if dataset_state and batcher is not None and hasattr(batcher, "load_state_dict"):
+                    try:
+                        batcher.load_state_dict(dataset_state)
+                        checkpoint_resume["loaded_dataset_state"] = True
+                    except Exception as ds_err:
+                        checkpoint_resume["dataset_load_error"] = str(ds_err)
+
                 checkpoint_resume["success"] = bool(checkpoint_resume["loaded_model"])
             except Exception as resume_err:
                 checkpoint_resume["error"] = str(resume_err)
@@ -199,6 +214,9 @@ class PyTorchNativeRunner:
             chaos_profile=chaos_profile,
             chaos_environment=chaos_probe.sample(),
         )
+        if checkpoint_resume["requested"] and checkpoint_resume.get("resumed_tokens"):
+            metrics.tokens_processed = int(checkpoint_resume["resumed_tokens"])
+
         metrics.sustained_control["checkpoint_resume"] = checkpoint_resume
 
         step_times: List[float] = []
@@ -236,6 +254,7 @@ class PyTorchNativeRunner:
                 forward_start = time.perf_counter()
                 out = model(x)
                 loss = ((out.float() - y) ** 2).mean()
+                metrics.tokens_processed += int(x.numel())
 
             forward_loss_seconds = time.perf_counter() - forward_start
             loss_val = float(loss.detach().float().item())
@@ -259,7 +278,7 @@ class PyTorchNativeRunner:
             guardrail_seconds = 0.0
             optimizer_seconds = 0.0
 
-            if (local_step % effective_grad_accum == 0) or (step == loop_end):
+            if (step % effective_grad_accum == 0) or (step == loop_end):
                 # Scale gradients by the actual number of accumulated microbatches (handles full & incomplete groups correctly)
                 scale_factor = 1.0 / max(1, unapplied_accum_steps)
                 for p in model.parameters():
@@ -280,7 +299,7 @@ class PyTorchNativeRunner:
             # Record and check AdaptiveRuntimeMemory
             if local_step % 10 == 0:
                 now_elapsed = max(time.perf_counter() - start_time, 1e-9)
-                cur_tps = metrics.tokens_processed / now_elapsed
+                cur_tps = max(0, metrics.tokens_processed - resumed_tokens_start) / now_elapsed
                 cur_sps = local_step / now_elapsed
                 adaptive_memory.record(
                     step=step,
@@ -324,7 +343,7 @@ class PyTorchNativeRunner:
             heartbeat_interval = _safe_int(data_cfg.get("progress_heartbeat_interval", 5), 5, low=1, high=100)
             if evidence_path and (step % heartbeat_interval == 0 or step == effective_steps):
                 now_elapsed = max(time.perf_counter() - start_time, 1e-9)
-                cur_tokens_sec = round(metrics.tokens_processed / now_elapsed, 2)
+                cur_tokens_sec = round(max(0, metrics.tokens_processed - resumed_tokens_start) / now_elapsed, 2)
                 cur_steps_sec = round(step / now_elapsed, 2)
                 prog_payload = {
                     "step": step,
@@ -367,6 +386,7 @@ class PyTorchNativeRunner:
                     self.checkpoint_manager.save_live_checkpoint(
                         model=model,
                         optimizer=optimizer,
+                        batcher=batcher,
                         metadata={
                             "version": "v89.0.0",
                             "step": step,
@@ -385,7 +405,7 @@ class PyTorchNativeRunner:
         metrics.total_seconds = round(total_elapsed, 6)
         metrics.avg_step_seconds = round(total_elapsed / max(1, metrics.micro_train_steps_completed), 9)
         metrics.steps_per_second = round(metrics.micro_train_steps_completed / total_elapsed, 3)
-        metrics.tokens_per_second = round(metrics.tokens_processed / total_elapsed, 3)
+        metrics.tokens_per_second = round(max(0, metrics.tokens_processed - resumed_tokens_start) / total_elapsed, 3)
         metrics.step_seconds_p95 = round(_percentile(step_times, 95), 9)
         metrics.step_seconds_p99 = round(_percentile(step_times, 99), 9)
         metrics.parameter_delta_abs_sum_positive = bool(
@@ -405,8 +425,10 @@ class PyTorchNativeRunner:
 
         if persistent_checkpoint and metrics.execution_performed and self.checkpoint_manager:
             checkpoint = self.checkpoint_manager.save_post_train(
-                model, optimizer,
-                {
+                model=model,
+                optimizer=optimizer,
+                batcher=batcher,
+                metadata={
                     "version": "v89.0.0",
                     "workload": metrics.workload,
                     "tokens_processed": metrics.tokens_processed,

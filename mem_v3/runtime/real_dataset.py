@@ -467,13 +467,15 @@ class RealDatasetBatcher:
             pass
 
     def _sync_info_counters(self) -> None:
-        self.info.cache_reads = self.cache_reads
-        self.info.cache_writes = self.cache_writes
-        self.info.cache_tokens_read = self.cache_tokens_read
-        self.info.cache_tokens_written = self.cache_tokens_written
-        self.info.iterator_restarts = self.iterator_restarts
-        self.info.dataset_exhaustions = self.dataset_exhaustions
-        self.info.empty_rows_seen = self.empty_rows_seen
+        if not hasattr(self, "info") or self.info is None:
+            return
+        self.info.cache_reads = getattr(self, "cache_reads", 0)
+        self.info.cache_writes = getattr(self, "cache_writes", 0)
+        self.info.cache_tokens_read = getattr(self, "cache_tokens_read", 0)
+        self.info.cache_tokens_written = getattr(self, "cache_tokens_written", 0)
+        self.info.iterator_restarts = getattr(self, "iterator_restarts", 0)
+        self.info.dataset_exhaustions = getattr(self, "dataset_exhaustions", 0)
+        self.info.empty_rows_seen = getattr(self, "empty_rows_seen", 0)
 
     def _extend_buffer(self) -> None:
         target = getattr(self, "_target_buffer", (self.sequence_length + 1) * self.batch_size * 16)
@@ -557,3 +559,55 @@ class RealDatasetBatcher:
         x = data[:, :-1].to(self.device, non_blocking=True)
         y = data[:, 1:].to(self.device, non_blocking=True)
         return x, y
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Capture dataset iterator, cache read position, and sample progress state."""
+        return {
+            "cache_read_pos": int(self.cache_read_pos),
+            "samples_seen": int(self.info.samples_seen),
+            "tokens_emitted": int(self.info.tokens_emitted),
+            "buffer": list(self.buffer),
+            "mix_index": int(self._mix_index),
+            "iterator_restarts": int(self.iterator_restarts),
+            "dataset_exhaustions": int(self.dataset_exhaustions),
+            "empty_rows_seen": int(self.empty_rows_seen),
+        }
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        """Restore dataset iterator position, token cache offset, and progress."""
+        if not isinstance(state, dict):
+            return
+        if "cache_read_pos" in state:
+            self.cache_read_pos = max(0, int(state["cache_read_pos"]))
+            try:
+                self._mem_v89_save_cache_read_pos()
+            except Exception:
+                pass
+        if "buffer" in state and isinstance(state["buffer"], (list, tuple)):
+            self.buffer = [int(x) for x in state["buffer"]]
+        if "samples_seen" in state:
+            target_samples = int(state["samples_seen"])
+            self.info.samples_seen = target_samples
+            if target_samples > 0 and self._iterator_factory is not None and not self.buffer:
+                try:
+                    it = self._iterator_factory()
+                    for _ in range(target_samples):
+                        next(it, None)
+                    self.iterator = it
+                except Exception:
+                    pass
+        if "tokens_emitted" in state:
+            self.info.tokens_emitted = int(state["tokens_emitted"])
+        if "mix_index" in state:
+            self._mix_index = int(state["mix_index"])
+        if "iterator_restarts" in state:
+            self.iterator_restarts = int(state["iterator_restarts"])
+            self.info.iterator_restarts = self.iterator_restarts
+        if "dataset_exhaustions" in state:
+            self.dataset_exhaustions = int(state["dataset_exhaustions"])
+            self.info.dataset_exhaustions = self.dataset_exhaustions
+        if "empty_rows_seen" in state:
+            self.empty_rows_seen = int(state["empty_rows_seen"])
+            self.info.empty_rows_seen = self.empty_rows_seen
+        self._sync_info_counters()
+

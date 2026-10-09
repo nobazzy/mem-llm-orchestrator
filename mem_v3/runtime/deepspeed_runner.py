@@ -991,7 +991,19 @@ class DeepSpeedRunner:
                 if opt_state:
                     pending_optimizer_state = opt_state
 
-                checkpoint_resume["metadata"] = payload.get("metadata", {})
+                meta = payload.get("metadata", {})
+                checkpoint_resume["metadata"] = meta
+                checkpoint_resume["resumed_step"] = int(meta.get("step") or meta.get("global_step") or meta.get("micro_train_steps_completed") or 0)
+                checkpoint_resume["resumed_tokens"] = int(meta.get("tokens_processed", 0))
+
+                dataset_state = payload.get("dataset_state_dict") or meta.get("dataset_state")
+                if dataset_state and batcher is not None and hasattr(batcher, "load_state_dict"):
+                    try:
+                        batcher.load_state_dict(dataset_state)
+                        checkpoint_resume["loaded_dataset_state"] = True
+                    except Exception as ds_err:
+                        checkpoint_resume["dataset_load_error"] = str(ds_err)
+
                 checkpoint_resume["success"] = True
             except Exception as exc:
                 checkpoint_resume["error"] = f"{type(exc).__name__}: {exc}"
@@ -1145,6 +1157,8 @@ class DeepSpeedRunner:
                         f"checkpoint_resume_failed:{checkpoint_resume['path']}:optimizer:{checkpoint_resume['optimizer_load_error']}"
                     )
             metrics.sustained_control["checkpoint_resume"] = checkpoint_resume
+            if checkpoint_resume.get("resumed_tokens"):
+                metrics.tokens_processed = int(checkpoint_resume["resumed_tokens"])
             _write_progress(metrics, phase="engine_initialized", step=0, loss=None)
 
             first_param = next(engine.module.parameters()).detach().clone().float()
@@ -1213,7 +1227,8 @@ class DeepSpeedRunner:
             if persistent_checkpoint and metrics.execution_performed:
                 checkpoint = self.checkpoint_manager.save_post_train(
                     engine.module, optimizer,
-                    {
+                    batcher=batcher,
+                    metadata={
                         "version": "v89.0.0", "workload": metrics.workload,
                         "benchmark_mode": metrics.benchmark_mode, "chaos_profile": metrics.chaos_profile,
                         "real_chaos_score": metrics.real_chaos_score, "dataset": metrics.dataset,

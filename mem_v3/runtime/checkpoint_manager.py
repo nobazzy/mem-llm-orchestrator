@@ -266,12 +266,26 @@ class CheckpointManager:
         if rng_state is None:
             rng_state = capture_rng_state()
 
+        dataset_state = kwargs.get("dataset_state_dict") or kwargs.get("dataset_state")
+        if dataset_state is None and kwargs.get("batcher") is not None:
+            batcher = kwargs["batcher"]
+            if hasattr(batcher, "state_dict"):
+                try:
+                    dataset_state = batcher.state_dict()
+                except Exception:
+                    dataset_state = None
+
+        if dataset_state is not None:
+            metadata.setdefault("dataset_state", dataset_state)
+
         payload = {
             "model_state_dict": model_state,
             "optimizer_state_dict": optimizer_state,
             "rng_state": rng_state,
             "metadata": metadata,
         }
+        if dataset_state is not None:
+            payload["dataset_state_dict"] = dataset_state
 
         return label, payload, metadata
 

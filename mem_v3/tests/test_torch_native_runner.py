@@ -186,3 +186,138 @@ def test_torch_native_runner_partial_checkpoint_allowed_when_opted_in(tmp_path):
     assert resume_info["loaded_model"] is True
     assert resume_info.get("partial_transfer") is True
 
+
+def test_torch_native_runner_faithful_resumption_cumulative_tokens_and_steps(tmp_path):
+    ckpt_mgr = CheckpointManager(root=tmp_path / "checkpoints")
+    runner = PyTorchNativeRunner(checkpoint_manager=ckpt_mgr)
+
+    # 1. First session: 5 steps, batch_size=2. Synthetic tokens per step = 2 * 16 = 32 -> 160 tokens
+    metrics1, ckpt1 = runner.run(
+        steps=5,
+        batch_size=2,
+        zero_stage=0,
+        precision="fp32",
+        persistent_checkpoint=True,
+        applied_hyperparams={"batch_size": 2, "precision": "fp32", "gradient_accumulation_steps": 1},
+        dataset_settings={"real_dataset": False, "evidence_dir": str(tmp_path / "evidence1")},
+    )
+
+    assert metrics1["execution_performed"] is True
+    assert metrics1["micro_train_steps_completed"] == 5
+    assert metrics1["tokens_processed"] == 160
+    assert ckpt1["checkpoint_written"] is True
+    saved_path = ckpt1["checkpoint_path"]
+
+    # 2. Resumed session: 5 additional steps starting from step 5.
+    metrics2, ckpt2 = runner.run(
+        steps=5,
+        batch_size=2,
+        zero_stage=0,
+        precision="fp32",
+        persistent_checkpoint=False,
+        load_checkpoint=saved_path,
+        applied_hyperparams={"batch_size": 2, "precision": "fp32", "gradient_accumulation_steps": 1},
+        dataset_settings={"real_dataset": False, "evidence_dir": str(tmp_path / "evidence2")},
+    )
+
+    resume_info = metrics2["sustained_control"]["checkpoint_resume"]
+    assert resume_info["requested"] is True
+    assert resume_info["success"] is True
+    assert resume_info["resumed_step"] == 5
+    assert resume_info["resumed_tokens"] == 160
+
+    # Verify cumulative token continuity: 160 resumed + 160 newly processed = 320 tokens total
+    assert metrics2["tokens_processed"] == 320
+    assert metrics2["micro_train_steps_completed"] == 5
+    # Throughput must be computed on the 160 new session tokens, not the cumulative 320
+    expected_approx_tps = 160.0 / metrics2["total_seconds"]
+    assert abs(metrics2["tokens_per_second"] - expected_approx_tps) < 1.0
+
+
+def test_torch_native_runner_interrupted_gradient_accumulation(tmp_path):
+    ckpt_mgr = CheckpointManager(root=tmp_path / "checkpoints")
+    runner = PyTorchNativeRunner(checkpoint_manager=ckpt_mgr)
+
+    # 1. Run 3 microbatches with grad_accum=4 (interrupted mid-accumulation)
+    # Loop ends at step 3: flush remaining 3 unapplied microbatches scaled by 1/3 -> 1 optimizer step
+    metrics1, ckpt1 = runner.run(
+        steps=3,
+        batch_size=2,
+        zero_stage=0,
+        precision="fp32",
+        persistent_checkpoint=True,
+        applied_hyperparams={"batch_size": 2, "precision": "fp32", "gradient_accumulation_steps": 4},
+        dataset_settings={"real_dataset": False, "evidence_dir": str(tmp_path / "evidence1")},
+    )
+
+    assert metrics1["execution_performed"] is True
+    assert metrics1["optimizer_step_count"] == 1
+    assert ckpt1["checkpoint_written"] is True
+    saved_path = ckpt1["checkpoint_path"]
+
+    # 2. Resume from step 3 for 5 more steps (steps 4..8) with grad_accum=4:
+    # - Step 4 hits global boundary (4 % 4 == 0) -> 1 microbatch scaled by 1 -> opt step 1
+    # - Steps 5, 6, 7, 8 accumulate 4 microbatches, hits boundary (8 % 4 == 0) -> scaled by 1/4 -> opt step 2
+    # Total optimizer steps in resumed session = 2
+    metrics2, _ = runner.run(
+        steps=5,
+        batch_size=2,
+        zero_stage=0,
+        precision="fp32",
+        persistent_checkpoint=False,
+        load_checkpoint=saved_path,
+        applied_hyperparams={"batch_size": 2, "precision": "fp32", "gradient_accumulation_steps": 4},
+        dataset_settings={"real_dataset": False, "evidence_dir": str(tmp_path / "evidence2")},
+    )
+
+    assert metrics2["execution_performed"] is True
+    resume_info = metrics2["sustained_control"]["checkpoint_resume"]
+    assert resume_info["success"] is True
+    assert resume_info["resumed_step"] == 3
+    assert metrics2["optimizer_step_count"] == 2
+
+
+def test_torch_native_runner_dataset_state_roundtrip(tmp_path):
+    from runtime.real_dataset import RealDatasetBatcher, DatasetRuntimeInfo
+
+    # Create mock batcher with state
+    batcher = object.__new__(RealDatasetBatcher)
+    batcher.cache_read_pos = 1024
+    batcher.buffer = [10, 20, 30]
+    batcher._mix_index = 3
+    batcher.iterator_restarts = 2
+    batcher.dataset_exhaustions = 1
+    batcher.empty_rows_seen = 4
+    batcher.info = DatasetRuntimeInfo("mock", "cfg", "mock", "cfg", "train", True, False, "", "gpt2", 50257, 128)
+    batcher.info.samples_seen = 50
+    batcher.info.tokens_emitted = 4096
+
+    ckpt_mgr = CheckpointManager(root=tmp_path / "checkpoints")
+    model = torch.nn.Sequential(torch.nn.Linear(16, 128), torch.nn.GELU(), torch.nn.Linear(128, 64), torch.nn.GELU(), torch.nn.Linear(64, 1))
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    # Save checkpoint including batcher state
+    ckpt_res = ckpt_mgr.save_post_train(
+        model=model,
+        optimizer=opt,
+        batcher=batcher,
+        metadata={"step": 10, "tokens_processed": 4096},
+    )
+    assert ckpt_res["checkpoint_written"] is True
+    ckpt_path = ckpt_res["checkpoint_path"]
+
+    # Verify payload contains dataset_state_dict
+    payload = ckpt_mgr.load_torch_checkpoint(ckpt_path)
+    assert "dataset_state_dict" in payload
+    assert payload["dataset_state_dict"]["cache_read_pos"] == 1024
+    assert payload["dataset_state_dict"]["samples_seen"] == 50
+    assert payload["dataset_state_dict"]["buffer"] == [10, 20, 30]
+
+    # Test load_state_dict restores batcher exactly
+    batcher2 = object.__new__(RealDatasetBatcher)
+    batcher2.info = DatasetRuntimeInfo("mock", "cfg", "mock", "cfg", "train", True, False, "", "gpt2", 50257, 128)
+    batcher2._iterator_factory = None
+    batcher2.load_state_dict(payload["dataset_state_dict"])
+    assert batcher2.state_dict() == batcher.state_dict()
+
+
