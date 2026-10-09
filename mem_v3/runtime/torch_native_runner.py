@@ -116,38 +116,65 @@ class PyTorchNativeRunner:
                 ckpt_path = checkpoint_resume["path"]
                 if ckpt_path.lower() == "latest":
                     ckpt_path = self.checkpoint_manager.latest_checkpoint_path() or ""
-                if ckpt_path:
-                    payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
-                    model_state = payload.get("model_state_dict") or {}
-                    if model_state:
-                        # Validate architecture compatibility: check keys overlap
-                        expected_keys = set(model.state_dict().keys())
-                        loaded_keys = len(expected_keys.intersection(set(model_state.keys())))
-                        if loaded_keys == 0:
-                            raise RuntimeError(f"checkpoint_model_incompatible: 0 of {len(expected_keys)} keys match")
-                        model.load_state_dict(model_state, strict=False)
-                        checkpoint_resume["loaded_model"] = True
+                if not ckpt_path:
+                    raise RuntimeError("checkpoint_resume_path_not_found")
 
-                    opt_state = payload.get("optimizer_state_dict") or {}
-                    if opt_state:
-                        try:
-                            optimizer.load_state_dict(opt_state)
-                            checkpoint_resume["loaded_optimizer"] = True
-                        except Exception as opt_err:
-                            checkpoint_resume["optimizer_load_error"] = str(opt_err)
+                payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
+                model_state = payload.get("model_state_dict") or {}
+                if not model_state:
+                    raise RuntimeError("checkpoint_missing_model_state_dict")
 
-                    # Restore RNG state if available
-                    from runtime.checkpoint_manager import restore_rng_state
-                    rng_res = restore_rng_state(payload.get("rng_state"))
-                    checkpoint_resume["loaded_rng"] = any(rng_res.values())
+                expected_keys = set(model.state_dict().keys())
+                checkpoint_keys = set(model_state.keys())
+                allow_partial = bool(
+                    data_cfg.get("allow_partial_checkpoint", False)
+                    or applied.get("allow_partial_checkpoint", False)
+                )
+                missing = expected_keys - checkpoint_keys
+                unexpected = checkpoint_keys - expected_keys
 
-                    meta = payload.get("metadata", {})
-                    checkpoint_resume["metadata"] = meta
-                    resumed_step_start = int(meta.get("step") or meta.get("global_step") or meta.get("micro_train_steps_completed") or 0)
-                    checkpoint_resume["resumed_step"] = resumed_step_start
-                    checkpoint_resume["success"] = bool(checkpoint_resume["loaded_model"])
+                if not allow_partial:
+                    if missing or unexpected:
+                        raise RuntimeError(
+                            f"checkpoint_model_keys_mismatch: missing={len(missing)} {sorted(list(missing))[:5]}, "
+                            f"unexpected={len(unexpected)} {sorted(list(unexpected))[:5]}"
+                        )
+                    model.load_state_dict(model_state, strict=True)
+                else:
+                    loaded_keys = len(expected_keys.intersection(checkpoint_keys))
+                    if loaded_keys == 0:
+                        raise RuntimeError(f"checkpoint_model_incompatible: 0 of {len(expected_keys)} keys match")
+                    model.load_state_dict(model_state, strict=False)
+                    checkpoint_resume["partial_transfer"] = True
+                    checkpoint_resume["missing_keys_count"] = len(missing)
+                    checkpoint_resume["unexpected_keys_count"] = len(unexpected)
+
+                checkpoint_resume["loaded_model"] = True
+
+                opt_state = payload.get("optimizer_state_dict") or {}
+                if opt_state:
+                    try:
+                        optimizer.load_state_dict(opt_state)
+                        checkpoint_resume["loaded_optimizer"] = True
+                    except Exception as opt_err:
+                        checkpoint_resume["optimizer_load_error"] = str(opt_err)
+
+                # Restore RNG state if available
+                from runtime.checkpoint_manager import restore_rng_state
+                rng_res = restore_rng_state(payload.get("rng_state"))
+                checkpoint_resume["loaded_rng"] = any(rng_res.values())
+
+                meta = payload.get("metadata", {})
+                checkpoint_resume["metadata"] = meta
+                resumed_step_start = int(meta.get("step") or meta.get("global_step") or meta.get("micro_train_steps_completed") or 0)
+                checkpoint_resume["resumed_step"] = resumed_step_start
+                checkpoint_resume["success"] = bool(checkpoint_resume["loaded_model"])
             except Exception as resume_err:
                 checkpoint_resume["error"] = str(resume_err)
+                checkpoint_resume["success"] = False
+                raise RuntimeError(
+                    f"checkpoint_resume_failed:{checkpoint_resume['path']}:{checkpoint_resume['error']}"
+                )
 
         checkpoint: Dict[str, Any] = {"checkpoint_written": False, "checkpoint_mode": "not_attempted"}
         metrics = DeepSpeedRunMetrics(

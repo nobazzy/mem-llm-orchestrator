@@ -18,12 +18,18 @@ _root = Path(__file__).resolve().parent.parent
 
 
 def get_latest_evidence_dir() -> Path | None:
-    dirs = [
-        d for d in (_root / "evidence").iterdir()
-        if d.is_dir() and not d.name.startswith("archive_")
-    ]
-    if dirs:
-        return sorted(dirs, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    evidence_path = _root / "evidence"
+    if not evidence_path.exists() or not evidence_path.is_dir():
+        return None
+    try:
+        dirs = [
+            d for d in evidence_path.iterdir()
+            if d.is_dir() and not d.name.startswith("archive_")
+        ]
+        if dirs:
+            return sorted(dirs, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    except Exception:
+        return None
     return None
 
 
@@ -58,10 +64,11 @@ def get_live_state() -> Dict[str, Any]:
 
     ckpt_dir = _root / "checkpoints"
     latest_ckpt = ""
-    latest_txt = sorted(ckpt_dir.glob("*_latest.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if latest_txt:
+    if ckpt_dir.exists() and ckpt_dir.is_dir():
         try:
-            latest_ckpt = latest_txt[0].read_text(encoding="utf-8", errors="ignore").strip()
+            latest_txt = sorted(ckpt_dir.glob("*_latest.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if latest_txt:
+                latest_ckpt = latest_txt[0].read_text(encoding="utf-8", errors="ignore").strip()
         except Exception:
             pass
 

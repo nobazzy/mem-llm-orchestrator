@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
+import torch
 from runtime.checkpoint_manager import CheckpointManager
 from runtime.torch_native_runner import PyTorchNativeRunner
 
@@ -114,3 +116,73 @@ def test_torch_native_runner_adaptive_memory_suggestions(tmp_path):
     assert metrics["execution_performed"] is True
     assert metrics["adaptive_memory"]["adaptive_memory_enabled"] is True
     assert metrics["adaptive_memory"]["decision_effects_recorded"] >= 2
+
+
+def test_torch_native_runner_strict_checkpoint_rejection_on_mismatch(tmp_path):
+    ckpt_mgr = CheckpointManager(root=tmp_path / "checkpoints")
+    runner = PyTorchNativeRunner(checkpoint_manager=ckpt_mgr)
+
+    # Save a checkpoint with a completely different model architecture (mismatched keys)
+    mismatched_model = torch.nn.Linear(32, 8)
+    ckpt_res = ckpt_mgr.save_live_checkpoint(
+        model=mismatched_model,
+        metadata={"step": 5},
+    )
+    mismatched_ckpt_path = ckpt_res["checkpoint_path"]
+
+    # Attempting to resume without allowing partial mismatch must fail loudly
+    with pytest.raises(RuntimeError) as exc_info:
+        runner.run(
+            steps=2,
+            batch_size=2,
+            load_checkpoint=mismatched_ckpt_path,
+            dataset_settings={"real_dataset": False, "evidence_dir": str(tmp_path / "evidence")},
+        )
+
+    assert "checkpoint_resume_failed" in str(exc_info.value)
+    assert "checkpoint_model_keys_mismatch" in str(exc_info.value)
+
+
+def test_torch_native_runner_partial_checkpoint_allowed_when_opted_in(tmp_path):
+    ckpt_mgr = CheckpointManager(root=tmp_path / "checkpoints")
+    runner = PyTorchNativeRunner(checkpoint_manager=ckpt_mgr)
+
+    # Save a checkpoint with partial matching keys (only first layer "0.weight" and "0.bias")
+    partial_state = {
+        "0.weight": torch.randn(128, 16),
+        "0.bias": torch.randn(128),
+    }
+    ckpt_res = ckpt_mgr.save_live_checkpoint(
+        model_state_dict=partial_state,
+        metadata={"step": 10},
+    )
+    partial_ckpt_path = ckpt_res["checkpoint_path"]
+
+    # Default strict mode rejects partial keys
+    with pytest.raises(RuntimeError) as exc_info:
+        runner.run(
+            steps=2,
+            batch_size=2,
+            load_checkpoint=partial_ckpt_path,
+            dataset_settings={"real_dataset": False, "evidence_dir": str(tmp_path / "evidence1")},
+        )
+    assert "checkpoint_model_keys_mismatch" in str(exc_info.value)
+
+    # Explicit opt-in with allow_partial_checkpoint=True succeeds
+    metrics, _ = runner.run(
+        steps=2,
+        batch_size=2,
+        load_checkpoint=partial_ckpt_path,
+        dataset_settings={
+            "real_dataset": False,
+            "evidence_dir": str(tmp_path / "evidence2"),
+            "allow_partial_checkpoint": True,
+        },
+    )
+
+    resume_info = metrics["sustained_control"]["checkpoint_resume"]
+    assert resume_info["requested"] is True
+    assert resume_info["success"] is True
+    assert resume_info["loaded_model"] is True
+    assert resume_info.get("partial_transfer") is True
+
