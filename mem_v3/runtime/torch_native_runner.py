@@ -106,8 +106,11 @@ class PyTorchNativeRunner:
             "success": False,
             "loaded_model": False,
             "loaded_optimizer": False,
+            "loaded_rng": False,
+            "resumed_step": 0,
             "error": "",
         }
+        resumed_step_start = 0
         if checkpoint_resume["requested"] and self.checkpoint_manager:
             try:
                 ckpt_path = checkpoint_resume["path"]
@@ -117,8 +120,14 @@ class PyTorchNativeRunner:
                     payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
                     model_state = payload.get("model_state_dict") or {}
                     if model_state:
+                        # Validate architecture compatibility: check keys overlap
+                        expected_keys = set(model.state_dict().keys())
+                        loaded_keys = len(expected_keys.intersection(set(model_state.keys())))
+                        if loaded_keys == 0:
+                            raise RuntimeError(f"checkpoint_model_incompatible: 0 of {len(expected_keys)} keys match")
                         model.load_state_dict(model_state, strict=False)
                         checkpoint_resume["loaded_model"] = True
+
                     opt_state = payload.get("optimizer_state_dict") or {}
                     if opt_state:
                         try:
@@ -126,8 +135,17 @@ class PyTorchNativeRunner:
                             checkpoint_resume["loaded_optimizer"] = True
                         except Exception as opt_err:
                             checkpoint_resume["optimizer_load_error"] = str(opt_err)
+
+                    # Restore RNG state if available
+                    from runtime.checkpoint_manager import restore_rng_state
+                    rng_res = restore_rng_state(payload.get("rng_state"))
+                    checkpoint_resume["loaded_rng"] = any(rng_res.values())
+
+                    meta = payload.get("metadata", {})
+                    checkpoint_resume["metadata"] = meta
+                    resumed_step_start = int(meta.get("step") or meta.get("global_step") or meta.get("micro_train_steps_completed") or 0)
+                    checkpoint_resume["resumed_step"] = resumed_step_start
                     checkpoint_resume["success"] = bool(checkpoint_resume["loaded_model"])
-                    checkpoint_resume["metadata"] = payload.get("metadata", {})
             except Exception as resume_err:
                 checkpoint_resume["error"] = str(resume_err)
 
@@ -161,9 +179,14 @@ class PyTorchNativeRunner:
         first_param = next(model.parameters()).detach().clone().float()
 
         optimizer.zero_grad()
-        unapplied_microbatches = 0
+        unapplied_accum_steps = 0
 
-        for step in range(1, effective_steps + 1):
+        # Run loop honoring resumed_step_start
+        loop_start = resumed_step_start + 1
+        loop_end = resumed_step_start + effective_steps
+
+        for step in range(loop_start, loop_end + 1):
+            local_step = step - resumed_step_start
             step_start = time.perf_counter()
             data_start = time.perf_counter()
 
@@ -199,18 +222,23 @@ class PyTorchNativeRunner:
                 break
 
             backward_start = time.perf_counter()
-            # Standard gradient accumulation: divide loss by effective_grad_accum
-            scaled_loss = loss / effective_grad_accum
-            scaled_loss.backward()
+            # Accumulate raw unscaled gradient for precise boundary scaling
+            loss.backward()
             backward_seconds = time.perf_counter() - backward_start
             metrics.backward_count += 1
-            unapplied_microbatches += 1
+            unapplied_accum_steps += 1
 
-            # Optimization step occurs only on boundary
+            # Optimization step occurs on accumulation boundary or on the final step
             guardrail_seconds = 0.0
             optimizer_seconds = 0.0
 
-            if step % effective_grad_accum == 0 or step == effective_steps:
+            if (local_step % effective_grad_accum == 0) or (step == loop_end):
+                # Scale gradients by the actual number of accumulated microbatches (handles full & incomplete groups correctly)
+                scale_factor = 1.0 / max(1, unapplied_accum_steps)
+                for p in model.parameters():
+                    if p.grad is not None:
+                        p.grad.detach().mul_(scale_factor)
+
                 guardrail_start = time.perf_counter()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=metrics.gradient_clip_norm)
                 guardrail_seconds = time.perf_counter() - guardrail_start
@@ -220,10 +248,40 @@ class PyTorchNativeRunner:
                 optimizer.zero_grad()
                 optimizer_seconds = time.perf_counter() - optimizer_start
                 metrics.optimizer_step_count += 1
-                unapplied_microbatches = 0
+                unapplied_accum_steps = 0
+
+            # Record and check AdaptiveRuntimeMemory
+            if local_step % 10 == 0:
+                now_elapsed = max(time.perf_counter() - start_time, 1e-9)
+                cur_tps = metrics.tokens_processed / now_elapsed
+                cur_sps = local_step / now_elapsed
+                adaptive_memory.record(
+                    step=step,
+                    directive=metrics.api_executive_action,
+                    lr=optimizer_lr,
+                    gradient_clip_norm=metrics.gradient_clip_norm,
+                    loss=loss_val,
+                    tokens_processed=metrics.tokens_processed,
+                    steps_per_second=cur_sps,
+                    tokens_per_second=cur_tps,
+                )
+                suggested = adaptive_memory.suggest_action()
+                if suggested != "none":
+                    metrics.adaptive_memory_suggestions_observed += 1
+                    if bool(data_cfg.get("adaptive_memory_apply_suggestions", False)):
+                        if suggested == "reduce_lr":
+                            new_lr = max(optimizer_lr * 0.95, base_lr * 0.50)
+                            for pg in optimizer.param_groups:
+                                pg["lr"] = new_lr
+                            optimizer_lr = new_lr
+                            metrics.adaptive_memory_suggestions_applied += 1
+                        elif suggested == "increase_clip":
+                            new_clip = max(0.5, metrics.gradient_clip_norm * 0.90)
+                            metrics.gradient_clip_norm = new_clip
+                            metrics.adaptive_memory_suggestions_applied += 1
 
             metrics.forward_count += 1
-            metrics.micro_train_steps_completed = step
+            metrics.micro_train_steps_completed = local_step
             total_step_seconds = time.perf_counter() - step_start
             step_times.append(total_step_seconds)
 
@@ -325,7 +383,9 @@ class PyTorchNativeRunner:
                     "version": "v89.0.0",
                     "workload": metrics.workload,
                     "tokens_processed": metrics.tokens_processed,
-                    "micro_train_steps_completed": metrics.micro_train_steps_completed,
+                    "step": loop_end,
+                    "global_step": loop_end,
+                    "micro_train_steps_completed": loop_end,
                     "batch_size": effective_batch,
                     "precision": effective_precision,
                     "steps_per_second": metrics.steps_per_second,

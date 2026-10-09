@@ -90,3 +90,42 @@ def test_post_publish_validation_failure_restores_backup(monkeypatch, tmp_path):
     # 3. Verify slot was restored to good1!
     loaded = manager.load_torch_checkpoint(slot_file, map_location="cpu")
     assert torch.equal(loaded["model_state_dict"]["w"], torch.tensor([10.0]))
+
+
+class _GlobalDummyPayloadObject:
+    def __init__(self, val: int = 42):
+        self.val = val
+
+
+def test_untrusted_checkpoint_rejected_unless_opt_in(monkeypatch, tmp_path):
+    import pytest
+    import runtime.checkpoint_manager as ckm
+
+    bad_pt = tmp_path / "custom_object.pt"
+
+    # Save payload with non-tensor/non-primitive custom object
+    torch.save(
+        {
+            "model_state_dict": {"w": torch.tensor([1.0])},
+            "custom": _GlobalDummyPayloadObject(99),
+            "metadata": {"step": 1},
+        },
+        bad_pt,
+    )
+
+    # 1. By default, attempting to load fails with weights_only rejection
+    monkeypatch.delenv(ckm.UNSAFE_LOAD_ENV, raising=False)
+    with pytest.raises(RuntimeError) as exc_info:
+        ckm._torch_load(bad_pt, map_location="cpu", allow_unsafe=False)
+    assert "checkpoint_untrusted_payload_rejected" in str(exc_info.value)
+
+    # 2. When explicitly permitted via allow_unsafe=True, it succeeds
+    loaded = ckm._torch_load(bad_pt, map_location="cpu", allow_unsafe=True)
+    assert "model_state_dict" in loaded
+    assert loaded["custom"].val == 99
+
+    # 3. When opted in via environment variable MEM_TRUST_EXTERNAL_CHECKPOINTS=1, it succeeds
+    monkeypatch.setenv(ckm.UNSAFE_LOAD_ENV, "1")
+    loaded_env = ckm._torch_load(bad_pt, map_location="cpu", allow_unsafe=False)
+    assert "model_state_dict" in loaded_env
+    assert loaded_env["custom"].val == 99

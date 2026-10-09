@@ -3,7 +3,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x%20(CUDA%20%2B%20CPU)-ee4c2c.svg)](https://pytorch.org/)
 [![DeepSpeed](https://img.shields.io/badge/DeepSpeed-Enabled-00599C.svg)](https://www.deepspeed.ai/)
-[![Tests](https://img.shields.io/badge/Tests-44%2F44%20Passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-47%2F47%20Passing-brightgreen)](tests/)
 [![Validation Status](https://img.shields.io/badge/Validation-1.15M%20Sustained%20Steps-success.svg)](EVALUATION.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -190,7 +190,7 @@ The `CheckpointManager` implements an atomic two-phase commit protocol:
 The project includes unit tests, mock suites, and integration tests:
 
 ```bash
-# Run the automated test suite (44 tests, 100% passing)
+# Run the automated test suite (47 tests, 100% passing)
 pytest -v
 
 # Run static architectural validation

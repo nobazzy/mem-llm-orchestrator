@@ -76,6 +76,8 @@ def test_v89_invalid_env_clip_norm_fallback(monkeypatch):
 
 
 def test_orchestrator_selects_native_runner_and_runs(tmp_path):
+    import pytest
+    pytest.importorskip("torch")
     from core.orchestrator import MemOrchestrator, OrchestratorContext
 
     ctx = OrchestratorContext(base_dir=str(tmp_path))

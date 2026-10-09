@@ -27,8 +27,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install pytest pyyaml psutil requests
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Run Core Suite Tests
+      - name: Run Test Suite
         working-directory: ./mem_v3
         run: |
-          pytest tests/test_v89_policy.py tests/test_v89_request.py tests/test_v89_profiler_memory.py
+          pytest -v

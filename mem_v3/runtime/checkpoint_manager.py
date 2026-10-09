@@ -137,22 +137,25 @@ def _torch_load(path: Path, map_location: Any = "cpu", *, allow_unsafe: bool = F
     """Load a checkpoint treating the file as untrusted input by default.
 
     ``weights_only=True`` restricts unpickling to tensors and primitive containers,
-    preventing arbitrary code execution from malicious pickles. The legacy full
-    loader is used only if trusted or if explicitly opted-in via env.
+    preventing arbitrary code execution from malicious pickles.
+    Insecure full pickle unpickling (weights_only=False) is ONLY allowed if
+    allow_unsafe is explicitly passed as True or the operator opts in via
+    the environment variable ``MEM_TRUST_EXTERNAL_CHECKPOINTS=1``.
+    Otherwise, safe load errors are propagated immediately.
     """
     try:
         return torch.load(path, map_location=map_location, weights_only=True)
     except Exception as safe_exc:
-        if not (allow_unsafe or _unsafe_load_globally_allowed()):
-            # If weights_only fails (e.g. custom types or older torch state), try unsafe if allowed, else raise
-            try:
-                return torch.load(path, map_location=map_location, weights_only=False)
-            except Exception:
-                raise safe_exc
-        return torch.load(path, map_location=map_location, weights_only=False)
+        if allow_unsafe or _unsafe_load_globally_allowed():
+            return torch.load(path, map_location=map_location, weights_only=False)
+        raise RuntimeError(
+            f"checkpoint_untrusted_payload_rejected: {path}: weights_only load failed "
+            f"({type(safe_exc).__name__}: {str(safe_exc)[:240]}). "
+            f"Set {UNSAFE_LOAD_ENV}=1 only if you explicitly trust this checkpoint file."
+        ) from safe_exc
 
 
-def _validate_checkpoint_file(path: Path, map_location: str = "cpu", *, allow_unsafe: bool = True) -> Dict[str, Any]:
+def _validate_checkpoint_file(path: Path, map_location: str = "cpu", *, allow_unsafe: bool = False) -> Dict[str, Any]:
     payload = _torch_load(path, map_location=map_location, allow_unsafe=allow_unsafe)
     _validate_payload(payload)
     return payload
@@ -259,9 +262,14 @@ class CheckpointManager:
         metadata.setdefault("checkpoint_label", label)
         metadata.setdefault("checkpoint_created_at", time.time())
 
+        rng_state = kwargs.get("rng_state")
+        if rng_state is None:
+            rng_state = capture_rng_state()
+
         payload = {
             "model_state_dict": model_state,
             "optimizer_state_dict": optimizer_state,
+            "rng_state": rng_state,
             "metadata": metadata,
         }
 
