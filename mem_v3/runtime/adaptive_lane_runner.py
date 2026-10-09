@@ -106,7 +106,7 @@ def get_lanes_for_model(model_preset: str = "medium_75m", seq_len: int = 256) ->
             ),
         }
 
-    if model_preset in {"xlarge_250m", "decoder_250m", "250m_decoder", "250m", "huge_350m"}:
+    if model_preset in {"large_160m", "decoder_160m", "160m_decoder", "160m", "xlarge_250m", "decoder_250m", "250m_decoder", "250m", "huge_350m"}:
         return {
             "aggressive_seq256_zero0_gacc4": LaneConfig(
                 name="aggressive_seq256_zero0_gacc4",

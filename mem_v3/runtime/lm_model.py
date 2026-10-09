@@ -122,6 +122,18 @@ def build_tiny_causal_lm(vocab_size: int, seq_len: int, preset: str = "tiny_deco
             dim_feedforward=4096,
         )
 
+    if preset in {"large_160m", "decoder_160m", "160m_decoder", "160m"}:
+        # Approx. 162.4M parameters with GPT-2 vocabulary and tied embeddings.
+        # Scaled 160M architecture: d_model=768, heads=12, layers=16, ff=3072.
+        return TinyCausalTransformer(
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            d_model=768,
+            nhead=12,
+            num_layers=16,
+            dim_feedforward=3072,
+        )
+
     if preset in {"large_130m", "decoder_130m", "130m_decoder", "130m"}:
         # Approx. 130M parameters with GPT-2 vocabulary and tied embeddings.
         # Scaled 130M architecture: d_model=768, heads=12, layers=12, ff=3072.
