@@ -99,6 +99,38 @@ class PyTorchNativeRunner:
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=optimizer_lr, eps=1e-6)
 
+        # Robust Checkpoint Resume for Native Runner
+        checkpoint_resume: Dict[str, Any] = {
+            "requested": bool(str(load_checkpoint or "").strip()),
+            "path": str(load_checkpoint or "").strip(),
+            "success": False,
+            "loaded_model": False,
+            "loaded_optimizer": False,
+            "error": "",
+        }
+        if checkpoint_resume["requested"] and self.checkpoint_manager:
+            try:
+                ckpt_path = checkpoint_resume["path"]
+                if ckpt_path.lower() == "latest":
+                    ckpt_path = self.checkpoint_manager.latest_checkpoint_path() or ""
+                if ckpt_path:
+                    payload = self.checkpoint_manager.load_torch_checkpoint(ckpt_path, map_location=device)
+                    model_state = payload.get("model_state_dict") or {}
+                    if model_state:
+                        model.load_state_dict(model_state, strict=False)
+                        checkpoint_resume["loaded_model"] = True
+                    opt_state = payload.get("optimizer_state_dict") or {}
+                    if opt_state:
+                        try:
+                            optimizer.load_state_dict(opt_state)
+                            checkpoint_resume["loaded_optimizer"] = True
+                        except Exception as opt_err:
+                            checkpoint_resume["optimizer_load_error"] = str(opt_err)
+                    checkpoint_resume["success"] = bool(checkpoint_resume["loaded_model"])
+                    checkpoint_resume["metadata"] = payload.get("metadata", {})
+            except Exception as resume_err:
+                checkpoint_resume["error"] = str(resume_err)
+
         checkpoint: Dict[str, Any] = {"checkpoint_written": False, "checkpoint_mode": "not_attempted"}
         metrics = DeepSpeedRunMetrics(
             micro_train_step_target=effective_steps,
@@ -122,10 +154,14 @@ class PyTorchNativeRunner:
             chaos_profile=chaos_profile,
             chaos_environment=chaos_probe.sample(),
         )
+        metrics.sustained_control["checkpoint_resume"] = checkpoint_resume
 
         step_times: List[float] = []
         start_time = time.perf_counter()
         first_param = next(model.parameters()).detach().clone().float()
+
+        optimizer.zero_grad()
+        unapplied_microbatches = 0
 
         for step in range(1, effective_steps + 1):
             step_start = time.perf_counter()
@@ -163,21 +199,28 @@ class PyTorchNativeRunner:
                 break
 
             backward_start = time.perf_counter()
-            loss.backward()
+            # Standard gradient accumulation: divide loss by effective_grad_accum
+            scaled_loss = loss / effective_grad_accum
+            scaled_loss.backward()
             backward_seconds = time.perf_counter() - backward_start
             metrics.backward_count += 1
+            unapplied_microbatches += 1
 
-            # Guardrails
-            guardrail_start = time.perf_counter()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=metrics.gradient_clip_norm)
-            guardrail_seconds = time.perf_counter() - guardrail_start
+            # Optimization step occurs only on boundary
+            guardrail_seconds = 0.0
+            optimizer_seconds = 0.0
 
-            optimizer_start = time.perf_counter()
-            if step % effective_grad_accum == 0:
+            if step % effective_grad_accum == 0 or step == effective_steps:
+                guardrail_start = time.perf_counter()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=metrics.gradient_clip_norm)
+                guardrail_seconds = time.perf_counter() - guardrail_start
+
+                optimizer_start = time.perf_counter()
                 optimizer.step()
                 optimizer.zero_grad()
+                optimizer_seconds = time.perf_counter() - optimizer_start
                 metrics.optimizer_step_count += 1
-            optimizer_seconds = time.perf_counter() - optimizer_start
+                unapplied_microbatches = 0
 
             metrics.forward_count += 1
             metrics.micro_train_steps_completed = step
@@ -250,8 +293,8 @@ class PyTorchNativeRunner:
                         },
                         label="v89",
                     )
-                except Exception:
-                    pass
+                except Exception as ckpt_err:
+                    metrics.sustained_control.setdefault("checkpoint_errors", []).append(str(ckpt_err))
 
         total_elapsed = max(time.perf_counter() - start_time, 1e-9)
         metrics.total_seconds = round(total_elapsed, 6)

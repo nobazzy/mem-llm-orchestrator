@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 from pathlib import Path
@@ -55,6 +55,15 @@ def test_degradation_detector_health_tracking():
     assert res3["bad_windows"] == 2
     assert res3["should_switch"] is True
     assert res3["recommended_action"] == "lane_switch"
+
+
+def test_degradation_detector_bounded_history():
+    detector = DegradationDetector(max_history=5)
+    for i in range(20):
+        detector.update(DegradationMetrics(step=i, tokens_per_second=1000.0, steps_per_second=1.0, optimizer_ratio=0.1, gpu_utilization=50.0))
+    assert len(detector.history) == 5
+    assert detector.history[0].step == 15
+    assert detector.history[-1].step == 19
 
 
 def test_supervisor_command_building():

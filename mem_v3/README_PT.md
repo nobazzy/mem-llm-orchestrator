@@ -207,7 +207,7 @@ O `CheckpointManager` utiliza um protocolo à prova de falhas:
 
 ## 6. Suíte de Testes e Validação
 
-Execute a suíte de testes com 38 validações automatizadas:
+Execute a suíte de testes com 44 validações automatizadas:
 
 ```bash
 # Rodar todos os testes unitários e funcionais

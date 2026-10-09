@@ -60,7 +60,8 @@ class LocalPolicyEngine:
         real_limited_apply = False
         if req.real_limited_apply:
             real_limited_apply = True
-            batch = max(1, min(max(batch, 4), 8))
+            # Bounded capping: cap at max 8, never inflate a small batch request (e.g. batch 1 or 2) upward!
+            batch = max(1, min(batch, 8))
             zero = max(0, min(zero, 1))
             if precision == "fp32":
                 precision = "fp16"
@@ -104,7 +105,8 @@ class LocalPolicyEngine:
                     or _mem_v89_policy_os.environ.get("MEM_GRAD_CLIP")
                     or _mem_v89_policy_os.environ.get("GRAD_CLIP")
                 )
-                gradient_clip_norm = _clamp_float(float(_env_clip) if _env_clip else d.gradient_clip_norm, 0.5, 0.25, 1.25)
+                raw_clip_norm = _clamp_float(_env_clip, d.gradient_clip_norm, 0.0, 100.0) if _env_clip else d.gradient_clip_norm
+                gradient_clip_norm = _clamp_float(raw_clip_norm, 0.5, 0.25, 1.25)
                 loss_scale_initial_power = _clamp_int(d.loss_scale_initial_power, 8, 6, 10)
                 numerical_recovery_budget = _clamp_int(d.numerical_recovery_budget, 10000, 100, 30000)
                 checkpoint_milestones = milestones or [100_000, 1_000_000, 5_000_000, req.max_steps]

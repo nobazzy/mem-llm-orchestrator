@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -28,6 +28,7 @@ class DegradationDetector:
         health_good_tokens: float = 19000.0,
         health_acceptable_tokens: float = 17500.0,
         health_attention_tokens: float = 16000.0,
+        max_history: int = 1000,
     ) -> None:
         self.min_degrade_step = min_degrade_step
         self.drop_ratio = drop_ratio
@@ -35,6 +36,7 @@ class DegradationDetector:
         self.health_good_tokens = health_good_tokens
         self.health_acceptable_tokens = health_acceptable_tokens
         self.health_attention_tokens = health_attention_tokens
+        self.max_history = max_history
 
         self.best_tokens_per_second: float = 0.0
         self.bad_window_count: int = 0
@@ -42,6 +44,8 @@ class DegradationDetector:
 
     def update(self, metrics: DegradationMetrics) -> Dict[str, Any]:
         self.history.append(metrics)
+        if len(self.history) > self.max_history:
+            self.history.pop(0)
         self.best_tokens_per_second = max(self.best_tokens_per_second, metrics.tokens_per_second)
 
         degraded = False

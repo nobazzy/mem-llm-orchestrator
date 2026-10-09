@@ -12,6 +12,7 @@ from domain.models import CONFIRMATION_TOKEN, VERSION, ExecutiveDirective, RunRe
 from infrastructure.llm_client import LLMPlanner
 from runtime.checkpoint_manager import CheckpointManager
 from runtime.deepspeed_runner import DeepSpeedRunner
+from runtime.torch_native_runner import PyTorchNativeRunner
 
 
 class OrchestratorContext:
@@ -21,7 +22,14 @@ class OrchestratorContext:
         self.policy = LocalPolicyEngine()
         self.llm = LLMPlanner()
         self.checkpoints = CheckpointManager(self.state.checkpoints_root)
-        self.runner = DeepSpeedRunner(self.checkpoints)
+        self.deepspeed_runner = DeepSpeedRunner(self.checkpoints)
+        self.native_runner = PyTorchNativeRunner(self.checkpoints)
+        self.runner = self.deepspeed_runner
+
+    def select_runner(self, benchmark_mode: str) -> Any:
+        if benchmark_mode in {"mem_native_pytorch", "torch_native"}:
+            return self.native_runner
+        return self.deepspeed_runner
 
 
 class MemOrchestrator:
@@ -81,7 +89,8 @@ class MemOrchestrator:
 
         if decision.allowed:
             try:
-                runtime, checkpoint = self.context.runner.run(
+                runner = self.context.select_runner(req.benchmark_mode)
+                runtime, checkpoint = runner.run(
                     steps=req.max_steps,
                     batch_size=req.batch_size,
                     zero_stage=req.zero_stage,

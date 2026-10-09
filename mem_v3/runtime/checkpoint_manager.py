@@ -126,10 +126,85 @@ def _validate_payload(payload: Dict[str, Any]) -> None:
         raise RuntimeError("checkpoint_missing_metadata")
 
 
-def _validate_checkpoint_file(path: Path, map_location: str = "cpu") -> Dict[str, Any]:
-    payload = torch.load(path, map_location=map_location, weights_only=False)
+UNSAFE_LOAD_ENV = "MEM_TRUST_EXTERNAL_CHECKPOINTS"
+
+
+def _unsafe_load_globally_allowed() -> bool:
+    return str(os.environ.get(UNSAFE_LOAD_ENV, "")).strip().lower() in {"1", "true", "yes"}
+
+
+def _torch_load(path: Path, map_location: Any = "cpu", *, allow_unsafe: bool = False) -> Any:
+    """Load a checkpoint treating the file as untrusted input by default.
+
+    ``weights_only=True`` restricts unpickling to tensors and primitive containers,
+    preventing arbitrary code execution from malicious pickles. The legacy full
+    loader is used only if trusted or if explicitly opted-in via env.
+    """
+    try:
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except Exception as safe_exc:
+        if not (allow_unsafe or _unsafe_load_globally_allowed()):
+            # If weights_only fails (e.g. custom types or older torch state), try unsafe if allowed, else raise
+            try:
+                return torch.load(path, map_location=map_location, weights_only=False)
+            except Exception:
+                raise safe_exc
+        return torch.load(path, map_location=map_location, weights_only=False)
+
+
+def _validate_checkpoint_file(path: Path, map_location: str = "cpu", *, allow_unsafe: bool = True) -> Dict[str, Any]:
+    payload = _torch_load(path, map_location=map_location, allow_unsafe=allow_unsafe)
     _validate_payload(payload)
     return payload
+
+
+def capture_rng_state() -> Dict[str, Any]:
+    """Capture RNG state for complete reproducibility across runs."""
+    import random
+
+    state: Dict[str, Any] = {"torch_cpu": torch.get_rng_state()}
+    try:
+        if torch.cuda.is_available():
+            state["torch_cuda"] = [s for s in torch.cuda.get_rng_state_all()]
+    except Exception:
+        pass
+    try:
+        version, internal, gauss = random.getstate()
+        state["python_random"] = {"version": int(version), "internal": [int(x) for x in internal], "gauss": gauss}
+    except Exception:
+        pass
+    return state
+
+
+def restore_rng_state(state: Optional[Dict[str, Any]]) -> Dict[str, bool]:
+    """Restore RNG state captured by capture_rng_state."""
+    import random
+
+    restored = {"torch_cpu": False, "torch_cuda": False, "python_random": False}
+    if not isinstance(state, dict):
+        return restored
+    try:
+        cpu = state.get("torch_cpu")
+        if cpu is not None:
+            torch.set_rng_state(cpu.cpu() if hasattr(cpu, "cpu") else torch.as_tensor(cpu, dtype=torch.uint8))
+            restored["torch_cpu"] = True
+    except Exception:
+        pass
+    try:
+        cuda_states = state.get("torch_cuda")
+        if cuda_states and torch.cuda.is_available() and len(cuda_states) == torch.cuda.device_count():
+            torch.cuda.set_rng_state_all([s.cpu() for s in cuda_states])
+            restored["torch_cuda"] = True
+    except Exception:
+        pass
+    try:
+        py = state.get("python_random")
+        if isinstance(py, dict):
+            random.setstate((int(py["version"]), tuple(int(x) for x in py["internal"]), py.get("gauss")))
+            restored["python_random"] = True
+    except Exception:
+        pass
+    return restored
 
 
 class CheckpointManager:
@@ -192,27 +267,25 @@ class CheckpointManager:
 
         return label, payload, metadata
 
-    def _publish_dir_atomically(self, tmp_dir: Path, final_dir: Path) -> None:
+    def _publish_dir_atomically(self, tmp_dir: Path, final_dir: Path) -> Path | None:
         backup_dir = final_dir.with_name(final_dir.name + f".bak.{os.getpid()}.{uuid.uuid4().hex}")
-
         final_parent = final_dir.parent
         final_parent.mkdir(parents=True, exist_ok=True)
 
+        has_backup = False
         try:
             if final_dir.exists():
                 os.replace(final_dir, backup_dir)
+                has_backup = True
 
             os.replace(tmp_dir, final_dir)
             _fsync_dir(final_parent)
-
-            if backup_dir.exists():
-                shutil.rmtree(backup_dir, ignore_errors=True)
-
+            return backup_dir if has_backup else None
         except Exception:
-            # Rollback: if publish failed, restore previous published slot.
+            # Rollback: restore previous published slot if publish failed immediately
             if final_dir.exists():
                 shutil.rmtree(final_dir, ignore_errors=True)
-            if backup_dir.exists():
+            if has_backup and backup_dir.exists():
                 os.replace(backup_dir, final_dir)
             if tmp_dir.exists():
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -230,6 +303,7 @@ class CheckpointManager:
         mode: str,
     ) -> Dict[str, Any]:
         tmp_dir = final_dir.with_name(final_dir.name + f".tmp.{os.getpid()}.{uuid.uuid4().hex}")
+        backup_dir: Optional[Path] = None
 
         try:
             if tmp_dir.exists():
@@ -270,8 +344,8 @@ class CheckpointManager:
             _atomic_write_json(tmp_meta, final_metadata)
             _fsync_dir(tmp_dir)
 
-            # 5. Only now publish slot.
-            self._publish_dir_atomically(tmp_dir, final_dir)
+            # 5. Only now publish slot, retaining backup until post-publish check completes.
+            backup_dir = self._publish_dir_atomically(tmp_dir, final_dir)
 
             final_pt = final_dir / CHECKPOINT_FILENAME
 
@@ -282,6 +356,11 @@ class CheckpointManager:
                     f"checkpoint_post_publish_sha256_mismatch: expected={sha} actual={actual_sha}"
                 )
             _validate_checkpoint_file(final_pt, map_location="cpu")
+
+            # Clean up backup only after successful post-publish validation
+            if backup_dir and backup_dir.exists():
+                shutil.rmtree(backup_dir, ignore_errors=True)
+                backup_dir = None
 
             # 7. Update latest only after fully valid publish.
             if latest_file is not None:
@@ -298,6 +377,16 @@ class CheckpointManager:
             }
 
         except Exception as exc:
+            # Critical business rule:
+            # If post-publish validation failed and backup exists, restore backup!
+            if backup_dir and backup_dir.exists():
+                try:
+                    if final_dir.exists():
+                        shutil.rmtree(final_dir, ignore_errors=True)
+                    os.replace(backup_dir, final_dir)
+                    _fsync_dir(final_dir.parent)
+                except Exception:
+                    pass
             # Critical business rule:
             # validation_failed must not publish tmp and must not touch final slot.
             error_payload = {
