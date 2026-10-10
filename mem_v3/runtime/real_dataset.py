@@ -400,10 +400,15 @@ class RealDatasetBatcher:
             return None
         available = self._cache_available_tokens()
         if available < count:
+            # If streaming is enabled or the iterator hasn't exhausted, do NOT wrap around!
+            # Return None so next_batch falls back to _extend_buffer() to stream fresh data from HuggingFace.
+            if getattr(self, "streaming", False) or getattr(self, "dataset_exhaustions", 0) < getattr(self, "max_exhaustions", 200):
+                return None
             try:
                 if self.cache_path.exists() and (self.cache_path.stat().st_size // 4) >= count:
                     self.cache_read_pos = 0
                     self.iterator_restarts += 1
+                    self._active_memmap = None
                     available = self._cache_available_tokens()
                 else:
                     return None
@@ -463,6 +468,7 @@ class RealDatasetBatcher:
                 fh.write(arr.tobytes())
             self.cache_writes += 1
             self.cache_tokens_written += int(arr.size)
+            self._active_memmap = None
         except Exception:
             pass
 
