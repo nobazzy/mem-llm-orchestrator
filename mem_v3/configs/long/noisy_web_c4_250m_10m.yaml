@@ -1,0 +1,31 @@
+run:
+  name: noisy_web_c4_250m_10m
+  target_global_steps: 10000000
+  output_dir: evidence/noisy_web_c4_250m_10m
+
+workload:
+  dataset:
+    type: huggingface
+    name: allenai/c4
+    config: en
+    split: train
+    text_field: text
+    fallback_enabled: true
+    fallback_name: roneneldan/TinyStories
+    fallback_split: train
+    chaos_profile: real_multilingual_noise
+
+  tokenizer:
+    name: gpt2
+
+  model:
+    preset: xlarge_250m
+
+training:
+  sequence_length: 256
+  mixed_precision: fp16
+  start_lane: safe_seq256
+
+mem:
+  controller_enabled: true
+  lane_policy: default_8gb

@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MEM Orchestrator v89/v3 — Unified Autonomous Training & Runtime Control")
     
     # Modern Training Controls
+    parser.add_argument("--preset", default=None, help="Shortcut preset configuration (e.g. noisy_250m_10m)")
     parser.add_argument("--steps", type=int, default=1000000, help="Target total training steps")
     parser.add_argument("--target-steps", type=int, default=1000000, help="Target total training steps")
     parser.add_argument("--start-lane", default="safe_seq256", help="Initial execution lane")
@@ -100,6 +101,25 @@ def main(argv: list[str] | None = None) -> None:
     if args.version:
         print(VERSION)
         return
+
+    if args.preset in {"noisy_250m_10m", "250m_noisy", "noisy_250m"}:
+        args.model_preset = "xlarge_250m"
+        args.steps = 10000000
+        args.target_steps = 10000000
+        args.dataset_name = "allenai/c4"
+        args.dataset_config = "en"
+        args.sequence_length = 256
+        args.start_lane = "safe_seq256"
+        args.precision = "fp16"
+    elif args.preset in {"fineweb_160m_1m", "160m_fineweb"}:
+        args.model_preset = "large_160m"
+        args.steps = 1000000
+        args.target_steps = 1000000
+        args.dataset_name = "HuggingFaceFW/fineweb-edu"
+        args.dataset_config = "sample-10BT"
+        args.sequence_length = 256
+        args.start_lane = "safe_seq256"
+        args.precision = "fp16"
 
     orchestrator = MemOrchestrator()
     if args.environment_doctor:
