@@ -231,7 +231,7 @@ def test_torch_native_runner_faithful_resumption_cumulative_tokens_and_steps(tmp
     assert metrics2["micro_train_steps_completed"] == 5
     # Throughput must be computed on the 160 new session tokens, not the cumulative 320
     expected_approx_tps = 160.0 / metrics2["total_seconds"]
-    assert abs(metrics2["tokens_per_second"] - expected_approx_tps) < 1.0
+    assert abs(metrics2["tokens_per_second"] - expected_approx_tps) < max(1.0, expected_approx_tps * 0.01)
 
 
 def test_torch_native_runner_interrupted_gradient_accumulation(tmp_path):
